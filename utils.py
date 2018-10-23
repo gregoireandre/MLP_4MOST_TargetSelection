@@ -1,10 +1,9 @@
 import os
 import math
 import numpy as np
-from astropy.io import fits
-from sklearn.metrics import confusion_matrix
 import pandas as pd
-from sklearn.metrics import auc
+from astropy.io import fits
+from sklearn.metrics import auc, confusion_matrix
 from sklearn.preprocessing import OneHotEncoder
 
 #########General utilities functions################
@@ -31,7 +30,7 @@ def report2dict(cr):
                 D_class_data[class_label][m.strip()] = float(row[j + 1].strip())
     return D_class_data
 
-def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classification_problem, train_test_split, fold_nbr, validation_split, class_fraction, model_path, preprocessing, mean_auc_roc, mean_auc_pr):
+def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classification_problem, train_test_split, dataset_idx, cv_fold_nbr, others_flag, model_path, preprocessing, early_stopped_epoch, mean_auc_roc, mean_auc_pr):
 
     noothers_precision = []
     noothers_recall = []
@@ -57,10 +56,10 @@ def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classi
                        'catalog': [catalog_filename],
                        'classification_problem': [classification_problem],
                        'constraints': [constraints],
-                       'class_fraction': [class_fraction],
-                       'train_test_split': [train_test_split],
-                       'val_split': [validation_split*100],
-                       'fold_nbr': [fold_nbr],
+                       'others_flag': [others_flag],
+                       'train_test_split / train_val_split': [train_test_split],
+                       'dataset_idx': [dataset_idx],
+                       'cv_fold_nbr': [cv_fold_nbr],
                        'preprocessing': [],
                        'preprocessing_params': []}
     if preprocessing is not None:
@@ -72,6 +71,7 @@ def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classi
         csv_dict_inputs['preprocessing_params'].append(None)
 
     csv_dict_performance = {'model_index': [model_index],
+                            'early_stop': [early_stopped_epoch],
                             'auc_pr': [mean_auc_pr],
                             'auc_roc': [mean_auc_roc],
                             'precision': [noothers_mean_precision],
@@ -81,7 +81,7 @@ def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classi
                             'others_recall': [others_recall],
                             'others_f1_score': [others_f1_score]}
 
-    csv_dict_parameters = {}
+    csv_dict_parameters = {'model_index': [model_index]}
 
     for i in list(ann_parameters.keys()):
         if (i != 'optimizer') and (i != 'kernel_regularizer'):
@@ -91,7 +91,7 @@ def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classi
 
     if os.path.isfile(benchmark_filename):
         csv_input = pd.read_csv(benchmark_filename)
-        new_csv = pd.concat([csv_input, pd.DataFrame.from_dict(csv_dict_inputs)])
+        new_csv = pd.concat([csv_input, pd.DataFrame.from_dict(csv_dict_inputs)], sort=False)
         new_csv.to_csv(benchmark_filename, index=False)
     else:
         pd.DataFrame.from_dict(csv_dict_inputs).to_csv(benchmark_filename, index=False)
@@ -236,48 +236,42 @@ def compute_roc_curve(confusion_matrix, fpr, tpr, ppv, n_classes):
 
 #######Dataset processing methods#########
 
-def load_dataset(dataset_path, classification_problem, train_test_split, dataset_idx, validation_split):
+def load_dataset(dataset_path, classification_problem, train_test_split, dataset_idx, cv_fold_nbr):
 
-    training_dataset_filename = classification_problem + '_train_' + str(train_test_split[0]) + '_' + str(train_test_split[1]) + '_' + str(dataset_idx) + '.fits'
+    training_dataset_filename = classification_problem + '_train_' + str(train_test_split[0]) + '_' + str(train_test_split[1]) + '_' + str(dataset_idx) + '_' + str(cv_fold_nbr) + '.fits'
+    validation_dataset_filename = classification_problem + '_val_' + str(train_test_split[0]) + '_' + str(train_test_split[1]) + '_' + str(dataset_idx) + '_' + str(cv_fold_nbr) + '.fits'
     testing_dataset_filename = classification_problem + '_test_' + str(train_test_split[0]) + '_' + str(train_test_split[1]) + '_' + str(dataset_idx) + '.fits'
 
     # load  dataset
     training_dataset = read_fits(os.path.join(dataset_path, training_dataset_filename))
     np.random.shuffle(training_dataset)
+    validation_dataset = read_fits(os.path.join(dataset_path, validation_dataset_filename))
+    np.random.shuffle(validation_dataset)
     testing_dataset = read_fits(os.path.join(dataset_path, testing_dataset_filename))
     np.random.shuffle(testing_dataset)
-
-    training_dataset, validation_dataset = validation_set_from_test(training_dataset, validation_split)
-
-    class_weights = compute_class_weights(validation_dataset)
 
     # split into input (X) and output (Y) variables
     X_train = training_dataset[:,1:-1]
     Y_train = training_dataset[:,-1]
 
     # split into input (X) and output (Y) variables
+    DES_id_val = validation_dataset[:,0]
     X_val = validation_dataset[:,1:-1]
     Y_val = validation_dataset[:,-1]
 
     # split into input (X) and output (Y) variables
+    DES_id_test = validation_dataset[:,0]
     X_test = testing_dataset[:,:-1]
     Y_test = testing_dataset[:,-1]
 
-    sample_weights_val = compute_sample_weights(Y_val, class_weights)
+    return X_train, Y_train, X_val, Y_val, DES_id_val, X_test, Y_test, DES_id_test
 
-    return X_train, Y_train, X_val, Y_val, sample_weights_val, X_test, Y_test
+def compute_weights(Y):
 
-def compute_dataset(training_dataset):
+    class_weights = compute_class_weights(Y)
+    sample_weights = compute_sample_weights(Y, class_weights)
 
-    class_weights = compute_class_weights(training_dataset)
-
-    # split into input (X) and output (Y) variables
-    X_train = training_dataset[:,:-1]
-    Y_train = training_dataset[:,-1]
-
-    sample_weights_train = compute_sample_weights(Y_train, class_weights)
-
-    return X_train, Y_train, sample_weights_train
+    return sample_weights
 
 def compute_sample_weights(Y, class_weights):
 
@@ -295,9 +289,9 @@ def compute_sample_weights(Y, class_weights):
 
     return np.array(sample_weights)
 
-def compute_class_weights(full_training_dataset):
-    unique, counts = np.unique(full_training_dataset[:, -1], return_counts=True)
-    nbr_objects = full_training_dataset.shape[0]
+def compute_class_weights(Y):
+    unique, counts = np.unique(Y, return_counts=True)
+    nbr_objects = Y.shape[0]
     class_count_dict = dict(zip(unique, counts))
     labels = list(class_count_dict.keys())
     nbr_labels = len(labels)
@@ -326,34 +320,9 @@ def one_hot_encode(Y_train, Y_val, Y_test):
 
     return Y_train, Y_val, Y_test
 
-def validation_set_from_test(train_dataset, val_split):
-
-    nbr_objects = train_dataset.shape[0]
-    unique, counts = np.unique(train_dataset[:, -1], return_counts=True)
-    class_count_dict = dict(zip(unique, counts))
-    nbr_object_val = []
-
-    isclass = {}
-    for label in list(class_count_dict.keys()):
-        isclass[label] = (train_dataset[:,-1]==label)
-
-    mask_train = np.ones(nbr_objects,dtype=bool)
-    idx_val = []
-    for h in list(class_count_dict.keys()):
-        nbr_object_val.append(math.floor(class_count_dict[h]*val_split))
-    for labidx, label in enumerate(list(class_count_dict.keys())):
-        avail = np.where(isclass[label])[0]
-        idx_val += avail[:nbr_object_val[labidx]].tolist()
-        mask_train[avail[:nbr_object_val[labidx]]] = False
-    idx_train = np.where(mask_train)[0]
-    table_dataset_train = train_dataset[idx_train, :]
-    table_dataset_val= train_dataset[idx_val,:]
-
-    return table_dataset_train, table_dataset_val
-
 def reduce_class_ratio(dataset, label, class_fraction):
 
-    # split into input (X) and output (Y) variables
+
     class_idx = []
     non_class_count = 0
     non_class_idx = []

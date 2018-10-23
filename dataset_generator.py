@@ -454,63 +454,114 @@ def fill_empty_entries(object_dict_list, arbitrary_magnitude):
 
     return object_dict_list
 
-def generate_cross_validation_datasets(cv_ratios, class_dict, dataset_np_array, reduced_keys, filename, others_flag, constraints, fits_filename):
+def generate_cross_testing_datasets(cv_ratios, class_dict, dataset_np_array, reduced_keys, filename, others_flag, constraints, fits_filename):
 
+    unique, counts = np.unique(dataset_np_array[:, -1], return_counts=True)
+    class_dict = dict(zip(unique, counts))
+    labels = list(class_dict.keys())
+    nbr_object_class = list(class_dict.values())
     nbr_objects = dataset_np_array.shape[0]
     nbr_features = dataset_np_array.shape[1]
-    nbr_classes = len(class_dict['labels'])
+    nbr_classes = len(labels)
     isclass = {}
-    for label in class_dict['labels']:
+    for label in labels:
         isclass[label] = (dataset_np_array[:,-1]==label)
     print(isclass)
 
     for i in cv_ratios:
         train_ratio = i[0]/100
         test_ratio = i[1]/100
-        nbr_fold = i[2]
+        dataset_idx = i[2]
         indexes_chosen_test = np.zeros(nbr_objects,dtype=bool)
-        for j in range(nbr_fold):
+        for j in range(dataset_idx):
             mask_train = np.ones(nbr_objects,dtype=bool)
             table_dataset_train = []
             idx_test = []
             nbr_object_test = []
-            for h in class_dict['nbr_objects']:
+            for h in nbr_object_class:
                 nbr_object_test.append(math.floor(h*test_ratio))
             print('Use ', i[1], ' percent of data : ', nbr_object_test)
-            print('Full data is ', class_dict['nbr_objects'])
-            for labidx, label in enumerate(class_dict['labels']):
+            print('Full data is ', nbr_object_class)
+            for labidx, label in enumerate(labels):
                 avail = np.where((isclass[label]) &  (~indexes_chosen_test))[0]
                 idx_test += avail[:nbr_object_test[labidx]].tolist()
                 indexes_chosen_test[avail[:nbr_object_test[labidx]]] = True
                 mask_train[avail[:nbr_object_test[labidx]]] = False
             idx_train = np.where(mask_train)[0]
             table_dataset_test = dataset_np_array[idx_test, :]
-            table_dataset_train= dataset_np_array[idx_train,:]
-            #     if (nbr_object_test[l] >= 1) and (dataset_np_array[k][-1] == class_dict['labels'][l]) and (k not in indexes_chosen_test):
-            #         idx_test.append(k)
-            #         nbr_object_test[l] -= 1
-            # indexes_chosen_test += idx_test
-            # idx_train = [m for m in range(nbr_objects) if m not in idx_test]
-            # table_dataset_train = dataset_np_array[idx_train, :]
-            # table_dataset_test = dataset_np_array[idx_test, :]
+            table_dataset_train = dataset_np_array[idx_train,:]
+            generate_cross_validation_datasets(cv_ratios, table_dataset_train, j+1, reduced_keys, filename, others_flag, constraints, fits_filename)
             savepath = os.path.join(script_dir, 'datasets', fits_filename, others_flag + '-others_' + constraints + '-constraints')
             all_fits_column_test = []
             all_fits_column_train = []
-            print(table_dataset_test)
             if not os.path.exists(savepath):
                 os.makedirs(savepath)
             for g in range(nbr_features):
-                all_fits_column_train.append(fits.Column(name=reduced_keys[g], array=table_dataset_train[:,g], format='D'))
                 all_fits_column_test.append(fits.Column(name=reduced_keys[g], array=table_dataset_test[:,g], format='D'))
             test = fits.BinTableHDU.from_columns(all_fits_column_test)
-            train = fits.BinTableHDU.from_columns(all_fits_column_train)
             try:
                 test.writeto(os.path.join(savepath, filename + '_test_' + str(i[0]) + '_' + str(i[1]) + '_' + str(j+1) + '.fits'))
                 print(filename + '_test_' + str(i[0]) + '_' + str(i[1]) + '_' + str(j+1) + '.fits')
             except OSError as e:
                 print(e)
+
+    return
+
+def generate_cross_validation_datasets(cv_ratios, dataset_np_array, dataset_idx, reduced_keys, filename, others_flag, constraints, fits_filename):
+
+
+    unique, counts = np.unique(dataset_np_array[:, -1], return_counts=True)
+    class_dict = dict(zip(unique, counts))
+    labels = list(class_dict.keys())
+    nbr_object_class = list(class_dict.values())
+    nbr_objects = dataset_np_array.shape[0]
+    nbr_features = dataset_np_array.shape[1]
+    nbr_classes = len(labels)
+    isclass = {}
+    for label in labels:
+        isclass[label] = (dataset_np_array[:,-1]==label)
+    print(isclass)
+
+    for i in cv_ratios:
+        train_ratio = i[0]/100
+        val_ratio = i[1]/100
+        nbr_fold = i[2]
+        indexes_chosen_val = np.zeros(nbr_objects,dtype=bool)
+        for j in range(nbr_fold):
+            mask_train = np.ones(nbr_objects,dtype=bool)
+            table_dataset_train = []
+            idx_val = []
+            nbr_object_val = []
+            for h in nbr_object_class:
+                nbr_object_val.append(math.floor(h*val_ratio))
+            print('Use ', i[1], ' percent of data : ', nbr_object_val)
+            print('Full data is ', nbr_object_class)
+            for labidx, label in enumerate(labels):
+                avail = np.where((isclass[label]) &  (~indexes_chosen_val))[0]
+                idx_val += avail[:nbr_object_val[labidx]].tolist()
+                indexes_chosen_val[avail[:nbr_object_val[labidx]]] = True
+                mask_train[avail[:nbr_object_val[labidx]]] = False
+            idx_train = np.where(mask_train)[0]
+            table_dataset_val = dataset_np_array[idx_val, :]
+            table_dataset_train= dataset_np_array[idx_train,:]
+            savepath = os.path.join(script_dir, 'datasets', fits_filename, others_flag + '-others_' + constraints + '-constraints')
+            all_fits_column_val = []
+            all_fits_column_train = []
+            print(table_dataset_val)
+            if not os.path.exists(savepath):
+                os.makedirs(savepath)
+            for g in range(nbr_features):
+                all_fits_column_train.append(fits.Column(name=reduced_keys[g], array=table_dataset_train[:,g], format='D'))
+                all_fits_column_val.append(fits.Column(name=reduced_keys[g], array=table_dataset_val[:,g], format='D'))
+            val = fits.BinTableHDU.from_columns(all_fits_column_val)
+            train = fits.BinTableHDU.from_columns(all_fits_column_train)
             try:
-                train.writeto(os.path.join(savepath, filename + '_train_' + str(i[0]) + '_' + str(i[1]) + '_' + str(j+1) + '.fits'))
+                val.writeto(os.path.join(savepath, filename + '_val_' + str(i[0]) + '_' + str(i[1]) + '_' + str(dataset_idx) + '_' + str(j+1) + '.fits'))
+                print(filename + '_val_' + str(i[0]) + '_' + str(i[1]) + '_' + str(j+1) + '.fits')
+            except OSError as e:
+                print(e)
+            try:
+                train.writeto(os.path.join(savepath, filename + '_train_' + str(i[0]) + '_' + str(i[1]) + '_' + str(dataset_idx) + '_' + str(j+1) + '.fits'))
                 print(filename + '_train_' + str(i[0]) + '_'+ str(i[1]) + '_' + str(j+1) + '.fits')
             except OSError as e:
                 print(e)
@@ -668,7 +719,7 @@ def noqso_multiclass_dataset(fits_path, fits_filename, others_flag, constraints)
     else:
         class_dict = {'nbr_objects': [nbrqso, nbrelg, nbrlrg, nbrbg], 'labels': [0, 1, 2, 3]}
 
-    generate_cross_validation_datasets(cv_ratios, class_dict, full_table_dataset, reduced_keys, dataset_filename, others_flag, all_constraints_str, fits_filename)
+    generate_cross_testing_datasets(cv_ratios, class_dict, full_table_dataset, reduced_keys, dataset_filename, others_flag, all_constraints_str, fits_filename)
 
 def full_multiclass_dataset(fits_path, fits_filename, others_flag, constraints):
 
@@ -740,7 +791,7 @@ def full_multiclass_dataset(fits_path, fits_filename, others_flag, constraints):
     else:
         class_dict = {'nbr_objects': [nbrelg, nbrlrg, nbrbg, nbrqso], 'labels': [1, 2, 3, 4]}
 
-    generate_cross_validation_datasets(cv_ratios, class_dict, full_table_dataset, reduced_keys, dataset_filename, others_flag, all_constraints_str, fits_filename)
+    generate_cross_testing_datasets(cv_ratios, class_dict, full_table_dataset, reduced_keys, dataset_filename, others_flag, all_constraints_str, fits_filename)
 
 def noelg_multiclass_dataset(fits_path, fits_filename, others_flag, constraints):
 
@@ -809,7 +860,7 @@ def noelg_multiclass_dataset(fits_path, fits_filename, others_flag, constraints)
     else:
         class_dict = {'nbr_objects': [nbrlrg, nbrbg, nbrqso], 'labels': [1, 2, 3]}
 
-    generate_cross_validation_datasets(cv_ratios, class_dict, full_table_dataset, reduced_keys, dataset_filename, others_flag, all_constraints_str, fits_filename)
+    generate_cross_testing_datasets(cv_ratios, class_dict, full_table_dataset, reduced_keys, dataset_filename, others_flag, all_constraints_str, fits_filename)
 
 def binary_dataset(fits_path, fits_filename, others_flag, constraints, object_to_select):
 
@@ -932,21 +983,23 @@ def binary_dataset(fits_path, fits_filename, others_flag, constraints, object_to
     print(nbr_one_label)
     class_dict = {'nbr_objects': [nbr_zero_label, nbr_one_label], 'labels': [0, 1]}
 
-    # Generate cross validation dataset from the full dataset using the generate_cross_validation_datasets function
+    # Generate cross validation dataset from the full dataset using the generate_cross_testing_datasets function
 
-    generate_cross_validation_datasets(cv_ratios, class_dict, full_table_dataset, reduced_keys, dataset_filename, others_flag, all_constraints_str, fits_filename)
+    generate_cross_testing_datasets(cv_ratios, class_dict, full_table_dataset, reduced_keys, dataset_filename, others_flag, all_constraints_str, fits_filename)
 #
 script_path = os.path.realpath(__file__)
 script_dir, _ = os.path.split(script_path)
 fits_filename = "4MOST.CatForGregoire.11Oct2018.zphot.fits"
-cv_ratios = [[90, 10, 10], [80, 20, 5]]
+cv_ratios = [[80, 20, 5]]
 others_flag = 'all'
 constraints = 'no'
 all_constraints_str = constraints_to_str(constraints)
+
+full_multiclass_dataset(script_dir, fits_filename, others_flag, constraints)
 #
 # object_to_select = 'ELG'
 # binary_dataset(script_dir, fits_filename, others_flag, constraints, object_to_select)
 
-noelg_multiclass_dataset(script_dir, fits_filename, others_flag, constraints)
+# noelg_multiclass_dataset(script_dir, fits_filename, others_flag, constraints)
 
 # generate_all_datasets()

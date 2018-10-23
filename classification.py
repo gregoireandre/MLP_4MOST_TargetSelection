@@ -1,52 +1,37 @@
 import __init__
-from keras.models import Sequential
-from keras import backend as K
-from keras.layers import Dense, Dropout, AlphaDropout, BatchNormalization
-from keras.activations import selu
-from keras.optimizers import Adam, SGD
-from keras.initializers import lecun_normal
-from keras.wrappers.scikit_learn import KerasClassifier
-from keras.utils import np_utils
-from keras.models import model_from_json
-from keras.regularizers import l1, l2
-from keras.callbacks import ModelCheckpoint, LearningRateScheduler, TensorBoard, EarlyStopping, ReduceLROnPlateau
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import KFold
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-from sklearn.pipeline import Pipeline
-from sklearn.decomposition import PCA
-from sklearn.metrics import classification_report
-from astropy.io import fits
-from tensorflow import set_random_seed
-from scipy.spatial import cKDTree
-import numpy as np
-import random
+import preprocessing
+from utils import *
+from custom_metrics import *
+
 import os
 import sys
 import math
 import json
-import matplotlib.pyplot as plt
-import pandas as pd
-import subprocess
-import preprocessing
-from utils import *
+import keras
+import random
 import datetime
+import subprocess
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from astropy.io import fits
 
 
 class Classification():
 
-    def __init__(self, classifier='ANN', preprocessing_method=None, random_seed=7, catalog_filename='4MOST.CatForGregoire.11Oct2018.zphot', classification_problem='BG_ELG_LRG_QSO_classification', constraints='no', class_fraction=[1.0, 1.0, 1.0, 1.0, 1.0], training_testing_split=[80, 20], validation_split=0.20, fold_nbr=1, cross_validation=False, tsboard=False, early_stop=False, lrdecay=False):
+    def __init__(self, classifier='ANN', preprocessing_method=None, random_seed=7, catalog_filename='4MOST.CatForGregoire.11Oct2018.zphot', classification_problem='BG_ELG_LRG_QSO_classification', constraints='no', others_flag='all', training_testing_split=[80, 20], dataset_idx=1, cv_fold_nbr=1, cross_validation=False, tsboard=False, early_stop=False, lrdecay=True):
 
         self.classifier = classifier
         self.preprocessing_method = preprocessing_method
         self.random_seed = random_seed
         self.catalog_filename = catalog_filename
         self.classification_problem = classification_problem
-        self.class_fraction = class_fraction
         self.constraints= constraints
+        self.others_flag = others_flag
         self.training_testing_split = training_testing_split
-        self.validation_split = validation_split
-        self.fold_nbr = fold_nbr
+        self.dataset_idx = dataset_idx
+        self.cv_fold_nbr = cv_fold_nbr
         self.cross_validation = cross_validation
         self.tsboard = tsboard
         self.early_stop = early_stop
@@ -54,14 +39,9 @@ class Classification():
 
         self.seed = 7
         np.random.seed(self.seed)
-        set_random_seed(self.seed)
         self.script_path = os.path.realpath(__file__)
         self.script_dir, _ = os.path.split(self.script_path)
         self.constraints = constraints_to_str(self.constraints)
-        if self.class_fraction[0] == 0.0:
-            self.others_flag = 'no'
-        else:
-            self.others_flag = 'all'
         self.classnames = compute_classnames(self.classification_problem, self.others_flag)
 
         print('Initialized, will load dataset')
@@ -80,24 +60,22 @@ class Classification():
 
     def load_dataset(self):
 
-        self.X_train, self.Y_train, self.X_val, self.Y_val, self.sample_weights_val, self.X_test, self.Y_test = load_dataset(self.dataset_path, self.classification_problem, self.training_testing_split, self.fold_nbr, self.validation_split)
-
+        self.X_train, self.Y_train, self.X_val, self.Y_val, self.DES_id_val, self.X_test, self.Y_test, self.DES_id_test = load_dataset(self.dataset_path, self.classification_problem, self.training_testing_split, self.dataset_idx, self.cv_fold_nbr)
+        self.sample_weights_val = compute_weights(self.Y_val)
         if self.preprocessing_method is not None:
             print(self.preprocessing_method)
             for i in self.preprocessing_method:
                 print(i)
                 if len(i['arguments']) == 1:
-                    self.resampled_training_dataset = getattr(preprocessing, i['method'])(self.X_train, self.Y_train, self.seed, i['arguments'][0])
+                    self.X_train, self.Y_train = getattr(preprocessing, i['method'])(self.X_train, self.Y_train, self.seed, i['arguments'][0])
                 elif len(i['arguments']) == 2:
-                    self.resampled_training_dataset = getattr(preprocessing, i['method'])(self.X_train, self.Y_train, self.seed, i['arguments'][0], i['arguments'][1])
+                    self.X_train, self.Y_train = getattr(preprocessing, i['method'])(self.X_train, self.Y_train, self.seed, i['arguments'][0], i['arguments'][1])
                 elif len(i['arguments']) == 3:
-                    self.resampled_training_dataset = getattr(preprocessing, i['method'])(self.X_train, self.Y_train, self.seed, i['arguments'][0], i['arguments'][1], i['arguments'][2])
+                    self.X_train, self.Y_train = getattr(preprocessing, i['method'])(self.X_train, self.Y_train, self.seed, i['arguments'][0], i['arguments'][1], i['arguments'][2])
                 elif len(i['arguments']) == 4:
-                    self.resampled_training_dataset = getattr(preprocessing, i['method'])(self.X_train, self.Y_train, self.seed, i['arguments'][0], i['arguments'][1], i['arguments'][2], i['arguments'][3])
-                self.X_train, self.Y_train, self.sample_weights_train = compute_dataset(self.resampled_training_dataset)
-        else:
-            self.resampled_training_dataset = reconstruct_dataset(self.X_train, self.Y_train)
-            self.X_train, self.Y_train, self.sample_weights_train = compute_dataset(self.resampled_training_dataset)
+                    self.X_train, self.Y_train = getattr(preprocessing, i['method'])(self.X_train, self.Y_train, self.seed, i['arguments'][0], i['arguments'][1], i['arguments'][2], i['arguments'][3])
+                preprocessing.save_preprocessed_dataset(self.script_dir, self.catalog_filename, self.others_flag, self.constraints, self.classification_problem, self.training_testing_split, self.dataset_idx, self.cv_fold_nbr, i['method'], i['arguments'], self.X_train, self.Y_train)
+        self.sample_weights_train = compute_weights(self.Y_train)
 
         self.input_dimensions = self.X_train.shape[1]
         print(self.input_dimensions)
@@ -140,7 +118,6 @@ class Classification():
                         model.add(BatchNormalization())
                     model.add(Dropout(self.ann_parameters['dropout'], None, self.seed))
             # Compile model
-            model.compile(loss=self.ann_parameters['loss_function'], optimizer=self.ann_parameters['optimizer'], metrics=self.ann_parameters['metrics'])
 
         self.model = model
 
@@ -151,11 +128,8 @@ class Classification():
         if not os.path.exists(os.path.join(self.script_dir, 'model_ANN')):
             os.makedirs(os.path.join(self.script_dir, 'model_ANN'))
 
-        directories = os.listdir(os.path.join(self.script_dir, 'model_ANN'))
-        for idx, i in directories:
-            if '.' in i:
-                del directories[idx]
-        model_directory = str(len(directories)+1)
+        nbr_directories = len(next(os.walk(os.path.join(self.script_dir, 'model_ANN')))[1])
+        model_directory = str(nbr_directories+1)
         self.model_path = os.path.join(self.script_dir, 'model_ANN', model_directory)
 
         os.makedirs(self.model_path)
@@ -170,6 +144,7 @@ class Classification():
             os.makedirs(os.path.join(self.model_path, 'checkpoints'))
 
         self.Y_train, self.Y_val, self.Y_test = one_hot_encode(self.Y_train, self.Y_val, self.Y_test)
+        custom_metrics = Metrics()
 
         ann_parameters_json = self.ann_parameters.copy()
         del ann_parameters_json['optimizer']
@@ -178,18 +153,25 @@ class Classification():
         with open(os.path.join(self.model_path, 'ann_parameters.json'), 'w') as fp:
             json.dump(ann_parameters_json, fp)
 
+        self.model.compile(loss=self.ann_parameters['loss_function'], optimizer=self.ann_parameters['optimizer'], metrics=[])
+
+        # serialize model architecture to JSON
+        model_json = self.model.to_json()
+        with open(os.path.join(self.model_path, str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.dataset_idx) + '_' + str(self.cv_fold_nbr) + '.json'), "w") as json_file:
+            json_file.write(model_json)
+
         checkpoints_name = (str(self.training_testing_split[0]) + '_'
                            + str(self.training_testing_split[1]) + '_'
-                           + str(self.fold_nbr) + '_'
-                           + '{epoch:02d}-epo'
-                           + '_{val_categorical_accuracy:.2f}-val_acc'
+                           + str(self.dataset_idx) + '_'
+                           + str(self.cv_fold_nbr) + '_'
+                           + '{epoch:03d}-epo'
                            + '.hdf5')
 
-        checkpoint = ModelCheckpoint(os.path.join(self.model_path, 'checkpoints', checkpoints_name), monitor='val_'+ self.ann_parameters['metrics'][0], verbose=2, save_best_only=True, mode='max')
-        lrate = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, min_lr=0.000001)
+        checkpoint = ModelCheckpoint(os.path.join(self.model_path, 'checkpoints', checkpoints_name), verbose=2, save_best_only=False)
+        lrdecay = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, min_lr=0.000001)
         earlystop = EarlyStopping(monitor='val_loss', min_delta=0, patience=15, verbose=1, mode='auto')
         tsboard = TensorBoard(log_dir=os.path.join(self.model_path, 'tsboard'), histogram_freq=0, batch_size=self.ann_parameters['batch_size'], write_graph=True, write_grads=False, write_images=True, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None)
-        callbacks_list = [checkpoint]
+        callbacks_list = [checkpoint, custom_metrics]
 
         if self.tsboard:
             callbacks_list += [tsboard]
@@ -198,23 +180,35 @@ class Classification():
         if self.lrdecay:
             callbacks_list += [lrdecay]
 
-        print(self.X_train.shape[1])
-        print(self.X_val.shape[1])
-
         if self.ann_parameters['weighted']:
             self.history = self.model.fit(self.X_train, self.Y_train, sample_weight=self.sample_weights_train, validation_data=(self.X_val, self.Y_val, self.sample_weights_val), epochs=self.ann_parameters['epochs'], batch_size=self.ann_parameters['batch_size'], callbacks=callbacks_list, verbose=2)
         else:
             self.history = self.model.fit(self.X_train, self.Y_train, validation_data=(self.X_val, self.Y_val), epochs=self.ann_parameters['epochs'], batch_size=self.ann_parameters['batch_size'], callbacks=callbacks_list, verbose=2)
 
-        # Save the model architecture and weights to .json and .hdf5 resp.
+        self.custom_metrics = custom_metrics
 
-        # serialize model to JSON
-        model_json = self.model.to_json()
-        with open(os.path.join(self.model_path, str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.fold_nbr) + '.json'), "w") as json_file:
-            json_file.write(model_json)
+        last_f1_score = self.custom_metrics.macro_f1s[-1]
+        best_f1_score = max(self.custom_metrics.macro_f1s)
+        best_f1_epoch = self.custom_metrics.epochs[self.custom_metrics.macro_f1s.index(best_f1_score)]
+        print(best_f1_epoch)
 
-        # serialize weights to HDF5
-        self.model.save_weights(os.path.join(self.model_path, str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.fold_nbr) + '_final.h5'))
+        directories = os.listdir(os.path.join(self.model_path, 'checkpoints'))
+        for idx, i in enumerate(directories):
+            if '{:03}'.format(best_f1_epoch) in i:
+                print(i)
+                print(best_f1_score)
+                new_filename = i.split('.')[0] + '_' + str(best_f1_score) + '-macro-f1.hdf5'
+                os.rename(os.path.join(self.model_path, 'checkpoints', i), os.path.join(self.model_path, 'checkpoints', new_filename))
+            else:
+                os.remove(os.path.join(self.model_path, 'checkpoints', i))
+
+        self.early_stopped_epoch = earlystop.stopped_epoch
+
+        if self.early_stopped_epoch > 0:
+            # serialize weights to HDF5
+            self.model.save_weights(os.path.join(self.model_path, str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.dataset_idx) + '_' + str(self.cv_fold_nbr) + '_' + str(self.early_stopped_epoch) + '-epo_' + str(last_f1_score) + '-macro-f1.hdf5'))
+        else:
+            self.model.save_weights(os.path.join(self.model_path, str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.dataset_idx) + '_' + str(self.cv_fold_nbr) + '_' + str(self.ann_parameters['epochs']) + '-epo_' + str(last_f1_score) + '-macro-f1.hdf5'))
 
         print("Saved model to disk")
 
@@ -225,13 +219,14 @@ class Classification():
         # Plot model loss function and accuracy across epochs
         # accuracy
         plt.figure(figsize=(19.2,10.8), dpi=100)
-        plt.plot(self.history.history['categorical_accuracy'])
-        plt.plot(self.history.history['val_categorical_accuracy'])
-        plt.title('model accuracy')
-        plt.ylabel('accuracy')
+        plt.plot(self.custom_metrics.epochs, self.custom_metrics.macro_f1s)
+        plt.plot(self.custom_metrics.epochs, self.custom_metrics.macro_precision)
+        plt.plot(self.custom_metrics.epochs, self.custom_metrics.macro_recall)
+        plt.title('Model Performance')
+        plt.ylabel('Validation Score')
         plt.xlabel('epoch')
-        plt.legend(['train', 'test'], loc='upper left')
-        plt.savefig(os.path.join(self.model_path, 'figures', str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.fold_nbr) + '_accuracy.png'))
+        plt.legend(['macro f1', 'macro precision', 'macro recall'], loc='upper left')
+        plt.savefig(os.path.join(self.model_path, 'figures', str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.dataset_idx) + '_' + str(self.cv_fold_nbr) + '_accuracy.png'))
 
         plt.clf()
 
@@ -239,11 +234,11 @@ class Classification():
         plt.figure(figsize=(19.2,10.8), dpi=100)
         plt.plot(self.history.history['loss'])
         plt.plot(self.history.history['val_loss'])
-        plt.title('model loss')
+        plt.title('Model loss')
         plt.ylabel('loss')
         plt.xlabel('epoch')
-        plt.legend(['train', 'test'], loc='upper left')
-        plt.savefig(os.path.join(self.model_path, 'figures', str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.fold_nbr) + '_loss.png'))
+        plt.legend(['train', 'test'], loc='upper right')
+        plt.savefig(os.path.join(self.model_path, 'figures', str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.dataset_idx) + '_' + str(self.cv_fold_nbr) + '_loss.png'))
 
         # evaluate the model
         Y_pred = self.model.predict(self.X_val)
@@ -258,24 +253,47 @@ class Classification():
             Y_pred = (Y_pred > 0.5).astype(int)
 
         report = classification_report(Y_val, Y_pred, target_names=self.classnames)
-        filename_report = str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.fold_nbr) + '_report.txt'
+        filename_report = str(self.training_testing_split[0]) + '_' + str(self.training_testing_split[1]) + '_' + str(self.dataset_idx) + '_' + str(self.cv_fold_nbr) + '_report.txt'
         with open(os.path.join(self.model_path, filename_report), "w") as fp:
             fp.write(report)
 
         reportdict = report2dict(report)
-        report2csv(reportdict, self.catalog_filename, self.constraints, self.ann_parameters, self.classification_problem, self.training_testing_split, self.fold_nbr, self.validation_split, self.class_fraction, self.model_path, self.preprocessing_method, mean_auc_roc, mean_auc_pr)
+        report2csv(reportdict, self.catalog_filename, self.constraints, self.ann_parameters, self.classification_problem, self.training_testing_split, self.dataset_idx, self.cv_fold_nbr, self.others_flag, self.model_path, self.preprocessing_method, self.early_stopped_epoch, mean_auc_roc, mean_auc_pr)
 
         # subprocess.Popen(r'explorer /select,' + model_path)
         return
 
     def define_ANN(self):
 
+        global keras
+        import keras
+        global set_random_seed
+        from tensorflow import set_random_seed
+        global classification_report
+        from sklearn.metrics import classification_report
+        global selu
+        from keras.activations import selu
+        global Sequential
+        from keras.models import Sequential
+        global l1, l2
+        from keras.regularizers import l1, l2
+        global Adam, SGD
+        from keras.optimizers import Adam, SGD
+        global lecun_normal
+        from keras.initializers import lecun_normal
+        global Dense, Dropout, AlphaDropout, BatchNormalization
+        from keras.layers import Dense, Dropout, AlphaDropout, BatchNormalization
+        global ModelCheckpoint, TensorBoard, EarlyStopping, ReduceLROnPlateau
+        from keras.callbacks import ModelCheckpoint, TensorBoard, EarlyStopping, ReduceLROnPlateau
+
+        set_random_seed(self.seed)
+
         self.ann_parameters =  {'loss_function': 'categorical_crossentropy',
                                 'learning_rate': 0.0005,
                                 'optimizer': Adam(lr=0.0005),
                                 'optimizer_str': 'adam',
-                                'batch_size': 128,
-                                'epochs': 150,
+                                'batch_size': 2048,
+                                'epochs': 2,
                                 'metrics': ['categorical_accuracy'],
                                 'nbr_layers': 2,
                                 'nbr_neurons' : 64,
@@ -346,32 +364,33 @@ class Classification():
 
         return
 
-preprocessing_method = [{'method': 'SMOTE_oversampling', 'arguments':['auto',5]}]                  # arguments are sampling_strategy, k_neighbors=5
-preprocessing_method = [{'method': 'ADASYN_oversampling', 'arguments':['auto',5]}]                 # arguments are sampling_strategy, n_neighbors=5
-preprocessing_method = [{'method': 'RANDOM_oversampling', 'arguments':['auto']}]                   # arguments are sampling_strategy
-preprocessing_method = [{'method': 'ENN_undersampling', 'arguments':['auto', 3, 'all']}]           # arguments are sampling_strategy, n_neighbors=3, kind_sel='all'
-preprocessing_method = [{'method': 'Allknn_undersampling', 'arguments':['auto', 3, 'all']}]        # arguments are sampling_strategy, n_neighbors=3, kind_sel='all'
-preprocessing_method = [{'method': 'Tomek_undersampling', 'arguments':['auto']}]                   # arguments are sampling_strategy
-preprocessing_method = [{'method': 'RANDOM_undersampling', 'arguments':['auto']}]                  # arguments are sampling_strategy
-preprocessing_method = [{'method': 'CENTROID_undersampling', 'arguments':['auto']}]                # arguments are sampling_strategy
-preprocessing_method = [{'method': 'NearMiss_undersampling', 'arguments':['auto', 3, 3, 1]}]       # arguments are sampling_strategy, n_neighbors=3, n_neighbors_ver3=3, version=1
-preprocessing_method = [{'method': 'IHT_undersampling', 'arguments':['auto', 'adaboost', 5]}]      # arguments are sampling_strategy, sampling_strategy, estimator='adaboost', cv=5
-preprocessing_method = [{'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]                # arguments are sampling_strategy, k_neighbors_smote=5, n_neighbors_enn=3, kind_sel='all'
-preprocessing_method = [{'method': 'SMOTE_Tomek', 'arguments':['auto']}]                           # sampling_strategy, k_neighbors_smote=5
-preprocessing_method = [{'method': 'ENN_undersampling', 'arguments':['auto', 5, 3, 'all']}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]
 
-#Default ANN run without preprocessing
+# preprocessing_method = [{'method': 'SMOTE_oversampling', 'arguments':['auto',5]}]                  # arguments are sampling_strategy, k_neighbors=5
+# preprocessing_method = [{'method': 'ADASYN_oversampling', 'arguments':['auto',5]}]                 # arguments are sampling_strategy, n_neighbors=5
+# preprocessing_method = [{'method': 'RANDOM_oversampling', 'arguments':['auto']}]                   # arguments are sampling_strategy
+# preprocessing_method = [{'method': 'ENN_undersampling', 'arguments':['auto', 3, 'all']}]           # arguments are sampling_strategy, n_neighbors=3, kind_sel='all'
+# preprocessing_method = [{'method': 'Allknn_undersampling', 'arguments':['auto', 3, 'all']}]        # arguments are sampling_strategy, n_neighbors=3, kind_sel='all'
+# preprocessing_method = [{'method': 'Tomek_undersampling', 'arguments':['auto']}]                   # arguments are sampling_strategy
+# preprocessing_method = [{'method': 'RANDOM_undersampling', 'arguments':['auto']}]                  # arguments are sampling_strategy
+# preprocessing_method = [{'method': 'CENTROID_undersampling', 'arguments':['auto']}]                # arguments are sampling_strategy
+# preprocessing_method = [{'method': 'NearMiss_undersampling', 'arguments':['auto', 3, 3, 1]}]       # arguments are sampling_strategy, n_neighbors=3, n_neighbors_ver3=3, version=1
+# preprocessing_method = [{'method': 'IHT_undersampling', 'arguments':['auto', 'adaboost', 5]}]      # arguments are sampling_strategy, sampling_strategy, estimator='adaboost', cv=5
+# preprocessing_method = [{'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]                # arguments are sampling_strategy, k_neighbors_smote=5, n_neighbors_enn=3, kind_sel='all'
+# preprocessing_method = [{'method': 'SMOTE_Tomek', 'arguments':['auto']}]                           # sampling_strategy, k_neighbors_smote=5
+# preprocessing_method = [{'method': 'ENN_undersampling', 'arguments':['auto', 5, 3, 'all']}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]
+
+# Default ANN run without preprocessing
 
 # BG_ELG_LRG_QSO_classification = Classification()
 # BG_ELG_LRG_QSO_classification.load_dataset()
 # BG_ELG_LRG_QSO_classification.run()
 
-#ANN run with preprocessing
-preprocessing_method = [{'method': 'SMOTE_oversampling', 'arguments':['auto',5]}]                  # arguments are sampling_strategy, k_neighbors=5
-preprocessing_method = [{'method': 'ENN_undersampling', 'arguments':['auto', 3, 'all']}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]
-BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method)
-BG_ELG_LRG_QSO_classification.load_dataset()
-BG_ELG_LRG_QSO_classification.run()
+# ANN run with preprocessing
+# preprocessing_method = [{'method': 'SMOTE_oversampling', 'arguments':['auto',5]}]                  # arguments are sampling_strategy, k_neighbors=5
+# preprocessing_method = [{'method': 'ENN_undersampling', 'arguments':['auto', 3, 'all']}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]
+# BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method)
+# BG_ELG_LRG_QSO_classification.load_dataset()
+# BG_ELG_LRG_QSO_classification.run()
 
 #RF gridsearch
 
@@ -388,24 +407,25 @@ BG_ELG_LRG_QSO_classification.run()
 
 #Benchmark processing methods
 
-# preprocessing_methods = [[{'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}],
-#                          [{'method': 'SMOTE_Tomek', 'arguments':['auto']}],
-#                          [{'method': 'SMOTE_oversampling', 'arguments':['auto', 5]}],
-#                          [{'method': 'ADASYN_oversampling', 'arguments':['auto', 5]}],
-#                          [{'method': 'RANDOM_oversampling', 'arguments':['auto']}],
-#                          [{'method': 'ENN_undersampling', 'arguments':['auto', 3, 'all']}],
-#                          [{'method': 'Allknn_undersampling', 'arguments':['auto', 3, 'all']}],
-#                          [{'method': 'Tomek_undersampling', 'arguments':['auto']}],
-#                          [{'method': 'RANDOM_undersampling', 'arguments':['auto']}],
-#                          [{'method': 'CENTROID_undersampling', 'arguments':['auto']}],
-#                          [{'method': 'CENTROID_undersampling', 'arguments':['auto']}],
-#                          [{'method': 'NearMiss_undersampling', 'arguments':['auto', 3, 3, 1]}],
-#                          [{'method': 'IHT_undersampling', 'arguments':['auto', 'adaboost', 5]}]]
-#
-# for i in preprocessing_methods:
-#     BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=i)
-#     BG_ELG_LRG_QSO_classification.load_dataset()
-#     BG_ELG_LRG_QSO_classification.run()
+preprocessing_methods = [[{'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}],
+                         [{'method': 'SMOTE_Tomek', 'arguments':['auto']}],
+                         [{'method': 'SMOTE_oversampling', 'arguments':['auto', 5]}],
+                         [{'method': 'ADASYN_oversampling', 'arguments':['auto', 5]}],
+                         [{'method': 'RANDOM_oversampling', 'arguments':['auto']}],
+                         [{'method': 'ENN_undersampling', 'arguments':['auto', 3, 'all']}],
+                         [{'method': 'Allknn_undersampling', 'arguments':['auto', 3, 'all']}],
+                         [{'method': 'Tomek_undersampling', 'arguments':['auto']}],
+                         [{'method': 'RANDOM_undersampling', 'arguments':['auto']}],
+                         [{'method': 'CENTROID_undersampling', 'arguments':['auto']}],
+                         [{'method': 'CENTROID_undersampling', 'arguments':['auto']}],
+                         [{'method': 'NearMiss_undersampling', 'arguments':['auto', 3, 3, 1]}],
+                         [{'method': 'IHT_undersampling', 'arguments':['auto', 'adaboost', 5]}],
+                         [{'method': 'ENN_undersampling', 'arguments':['auto', 3, 'all']}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]]
+
+for i in preprocessing_methods:
+    BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=i)
+    BG_ELG_LRG_QSO_classification.load_dataset()
+    # BG_ELG_LRG_QSO_classification.run()
 
 # BG_ELG_LRG_QSO_classification_noothers = Classification(class_fraction=[0.0, 1.0, 1.0, 1.0, 1.0])
 
