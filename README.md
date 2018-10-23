@@ -1,4 +1,4 @@
-# Project Title
+# ML 4MOST Target Selection
 
 This repository focus on target selection using Machine Learning Techniques in the framework of 4MOST project.
 The selection aims at efficiently detect Emission Line Galaxies (ELG), Bright Galaxies (BG), Luminous Red Galaxies (LRG) and Quasar (QSO) among large photometric surveys such as DES.
