@@ -106,6 +106,32 @@ python classification.py
 The script allows to train different classifiers such as Random Forest, Support Vector Machine or Multi-Layer Perceptron.
 As it is the case for the generation of the dataset, one should adapt the bottom of the script to decide which classifier, dataset and preprocessing techniques to use.
 
+After execution, the script store the results and saved model with the following architecture :
+
+```
+model_ANN/
+	<model_index>/
+		checkpoints/
+			<model_name>_<epoch>_<metric_score>.hdf5
+			...
+		figures/
+			<model_name>_<metric_score>.png
+			<model_name>_loss.png
+		tsboard/
+			<tensoboard files>
+		<model_name>.json (model architecture saved as json format)
+		ann_parameters.json (model input parameters saved as dictionnary in json format)
+		<model_name>_<epoch>_<metric_score>.hdf5 (final model weights at end of training)
+		<model_name>_report.txt (model classification performances report on validation data)
+	Benchmnark_ANN_inputs.csv (Table that summarizes the inputs used in classification.py for each model)
+	Benchmnark_ANN_parameters.csv (Table that summarizes the inputs used in the neural network for each model)
+	Benchmnark_ANN_performances.csv (Table that summarizes the performances of each model on validation data)
+model_RF/
+	TO DO
+model_SVM/
+	TO_DO
+```
+
 ## Authors
 
 * **Grégoire André**
