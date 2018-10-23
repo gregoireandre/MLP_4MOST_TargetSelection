@@ -2,7 +2,7 @@
 
 This repository focus on target selection using Machine Learning Techniques in the framework of 4MOST project.
 The selection aims at efficiently detect Emission Line Galaxies (ELG), Bright Galaxies (BG), Luminous Red Galaxies (LRG) and Quasar (QSO) among large photometric surveys such as DES.
-To do so a Multi Layeer Perceptron (MLP) network is used as a classifier.
+To do so various classifiers such as Multi-Layer Perceptron, Random Forest or Support Vector Machine were implemented using the kera's and scikit-learn python libraries.
 The inputs used for target selection are DES magnitudes and corresponding errors as well as infrared and near infrared magnitudes and errors (i.e WISE_w1, VHS_j, VHS_k).
 The output of the MLP network has the form of an array of confidence score with 5 components corresponding to the 5 classes considered (i.e [Others, ELG, LRG, BG, QSO])
 
