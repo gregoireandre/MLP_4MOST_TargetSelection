@@ -53,11 +53,9 @@ or on Windows using Anaconda prompt :
 activate lastro
 ```
 
-End with an example of getting some data out of the system or using it for a little demo
-
 ## Dataset
 
-The dataset (i.e catalog) used to train and test the different machine learning algortihms being too big to store on github, the latter can be downloaded from at the following link :
+The dataset (i.e catalog) used to train and test the different machine learning algortihms being too big to be stored on github, the latter can be downloaded from at the following link :
 
 
 Make sure that you download the catalog in the src folder !
@@ -109,7 +107,7 @@ As it is the case for the generation of the dataset, one should adapt the bottom
 
 ## Authors
 
-* **Grégoire André** - *Initial work* - [PurpleBooth](https://github.com/PurpleBooth)
+* **Grégoire André**
 
 ## License
 
