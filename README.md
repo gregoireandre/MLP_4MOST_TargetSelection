@@ -13,6 +13,7 @@ These instructions will get you a copy of the project up and running on your loc
 ### Prerequisites
 
 [Anaconda](https://www.anaconda.com/download/)
+
 [Git](https://git-scm.com/downloads)
 
 ```
