@@ -57,8 +57,9 @@ activate lastro
 
 The dataset (i.e catalog) used to train and test the different machine learning algortihms being too big to be stored on github, the latter can be downloaded from at the following link :
 
+https://drive.google.com/open?id=1CUUORiH8SCtoD6nB7ST_Ha_D1SQjfq1h
 
-Make sure that you download the catalog in the src folder !
+Make sure to extract the ccatalog in the "src" folder in its original .fits format.
 
 ## Run the code
 
