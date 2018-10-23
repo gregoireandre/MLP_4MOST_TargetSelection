@@ -20,7 +20,7 @@ These instructions will get you a copy of the project up and running on your loc
 Give examples
 ```
 
-### Installing
+### Installation
 
 Clone the github repository using git command :
 
