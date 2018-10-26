@@ -59,9 +59,9 @@ def report2csv(model_index, all_models_path, catalog_filename, constraints, ann_
 
     csv_dict_performance = {'model_index': [model_index],
                             'early_stop': [early_stopped_epoch],
-                            'macro_precision': [custom_metrics.macro_precision],
-                            'macro_recall': [custom_metrics.macro_recall],
-                            'macro_f1score': [custom_metrics.macro_f1s],
+                            'macro_precision': [custom_metrics.macro_precision[-1]],
+                            'macro_recall': [custom_metrics.macro_recall[-1]],
+                            'macro_f1score': [custom_metrics.macro_f1s[-1]],
                             'mean_auc_pr': [mean_auc_pr],
                             'mean_auc_roc': [mean_auc_roc]}
 
@@ -224,7 +224,6 @@ def compute_aucs(Y_pred, Y_val, X_val_id, classnames, savepath=None, plot=False)
         auc_pr.append(np.trapz(y=([1] + ppv_pr[k] + [0]), x=([0] + tpr_pr[k] + [1])))
 
     if plot:
-        plt.close()
         plot_pr_curve(fpr, tpr_pr, ppv_pr, thresholds_pr, nbr_classes, classnames, savepath, auc_pr)
 
     mean_auc_pr = sum(auc_pr)/len(auc_pr)

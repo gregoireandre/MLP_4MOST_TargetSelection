@@ -240,6 +240,7 @@ class Classification():
             all_combinations = all_combinations[:max_run]
 
         for combination in all_combinations:
+            self.load_dataset()
             self.ann_parameters = dict(zip(all_keys, combination))
             print(self.ann_parameters)
             if self.ann_parameters['kernel_regularizer'] is not None:
@@ -247,7 +248,7 @@ class Classification():
                 for i in list(regularizer_dict.keys()):
                     if regularizer_dict[i] > 0.0:
                         regularizer_str = i
-                        regularization_strength = regularizer_dict[i]
+                        regularization_strength = float(regularizer_dict[i])
                 self.ann_parameters['kernel_regularizer_str'] = regularizer_str
                 self.ann_parameters['regularization_strength'] = regularization_strength
             else:
@@ -359,6 +360,7 @@ class Classification():
         del ann_parameters_json['optimizer']
         del ann_parameters_json['kernel_regularizer']
         ann_parameters_json['metrics'] = ann_parameters_json['metrics'][0]
+        print(ann_parameters_json)
         with open(os.path.join(self.model_path, 'ANN_parameters.json'), 'w') as fp:
             json.dump(ann_parameters_json, fp)
 
@@ -628,7 +630,6 @@ def compute_confusion_matrix(classifier, model_index, weights_flag='final'):
 # ANN gridsearch
 
 BG_ELG_LRG_QSO_classification = Classification(others_flag='no')
-BG_ELG_LRG_QSO_classification.load_dataset()
 BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
 
 #Random Forest gridsearch
