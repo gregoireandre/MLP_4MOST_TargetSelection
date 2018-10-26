@@ -1,3 +1,6 @@
+# Module that contains various preprocessing techniques for imbalanced datasets.
+# The documentation for those functions can be found at : https://imbalanced-learn.readthedocs.io/en/stable/index.html
+
 import os
 import numpy as np
 import pandas as pd
@@ -8,11 +11,15 @@ from imblearn.combine import SMOTEENN,SMOTETomek
 from imblearn.over_sampling import SMOTE, RandomOverSampler, ADASYN
 from imblearn.under_sampling import ClusterCentroids, NearMiss, RandomUnderSampler, EditedNearestNeighbours, TomekLinks, AllKNN, InstanceHardnessThreshold
 
-def save_preprocessed_dataset(script_dir, catalog_filename, others_flag, constraints, classification_problem, train_test_split, dataset_idx, cv_fold_nbr, preprocessing_method, preprocessing_parameters, X_train, Y_train):
+def save_preprocessed_dataset(script_dir, catalog_filename, others_flag, constraints, data_imputation, classification_problem, train_test_split, dataset_idx, cv_fold_nbr, preprocessing_methods, X_train, Y_train):
 
-    dataset_path = os.path.join(script_dir, 'datasets', catalog_filename,  others_flag + '-others_' + constraints + '-constraints', classification_problem + '_train_' + str(train_test_split[0]) + '_' + str(train_test_split[1]) + '_' + str(dataset_idx) + '_' + str(cv_fold_nbr) + '.fits')
-    savepath = os.path.join(script_dir, 'datasets', catalog_filename,  others_flag + '-others_' + constraints + '-constraints', 'preprocessed', classification_problem + '_train' + str(train_test_split[0]) + '_' + str(train_test_split[1]) + '_' + str(dataset_idx) + '_' + str(cv_fold_nbr))
-    filename = preprocessing_method + '_' + '_'.join(str(x) for x in preprocessing_parameters)
+    dataset_path = os.path.join(script_dir, 'datasets', catalog_filename,  others_flag + '-others_' + constraints + '-constraints_' + str(data_imputation) + '-imputation', classification_problem + '_train_' + str(train_test_split[0]) + '_' + str(train_test_split[1]) + '_' + str(dataset_idx) + '_' + str(cv_fold_nbr) + '.fits')
+    savepath = os.path.join(script_dir, 'datasets', catalog_filename,  others_flag + '-others_' + constraints + '-constraints_' + str(data_imputation) + '-imputation', 'preprocessed', classification_problem + '_train_' + str(train_test_split[0]) + '_' + str(train_test_split[1]) + '_' + str(dataset_idx) + '_' + str(cv_fold_nbr))
+    for idx, i in enumerate(preprocessing_methods):
+        if idx == 0:
+            filename = i['method'] + '_' + '_'.join(str(x) for x in i['arguments'])
+        else:
+            filename += '_' + i['method'] + '_' + '_'.join(str(x) for x in i['arguments'])
 
     if not os.path.exists(savepath):
         os.makedirs(savepath)
@@ -34,7 +41,7 @@ def save_preprocessed_dataset(script_dir, catalog_filename, others_flag, constra
 
     return
 
-#####Oversampling methods#####
+################################################################################Oversampling Methods###############################################################################
 
 def SMOTE_oversampling(X_train, Y_train, seed, sampling_strategy, k_neighbors=5):
     smote = SMOTE(random_state=seed, n_jobs=-1, k_neighbors=k_neighbors, sampling_strategy=sampling_strategy)
@@ -60,7 +67,7 @@ def RANDOM_oversampling(X_train, Y_train, seed, sampling_strategy):
 
     return X_train_resampled, Y_train_resampled
 
-#####Undersampling methods#####
+################################################################################Undersampling Methods###############################################################################
 
 def ENN_undersampling(X_train, Y_train, seed, sampling_strategy, n_neighbors=3, kind_sel='all'):
     enn = EditedNearestNeighbours(random_state=seed, n_jobs=-1, n_neighbors=n_neighbors, kind_sel=kind_sel, sampling_strategy=sampling_strategy)
@@ -98,16 +105,16 @@ def CENTROID_undersampling(X_train, Y_train, seed, sampling_strategy):
 
     cc = ClusterCentroids(random_state=seed, n_jobs=-1, sampling_strategy=sampling_strategy)
     print('Before Cluster Centroid undersampling : ', sorted(Counter(Y_train).items()))
-    X_train_resampled, Y_train_resampled = cc.fit_resample(X, y)
+    X_train_resampled, Y_train_resampled = cc.fit_resample(X_train, Y_train)
     print('After Cluster Centroid undersampling : ', sorted(Counter(Y_train_resampled).items()))
 
     return X_train_resampled, Y_train_resampled
 
 def NearMiss_undersampling(X_train, Y_train, seed, sampling_strategy, n_neighbors=3, n_neighbors_ver3=3, version=1):
 
-    nm = NearMiss(random_state=seed, version=version, n_neighbors=n_neighbors, n_neighbors_ver3=n_neighbors_ver3, n_jobs=1, ratio=None, sampling_strategy=sampling_strategy)
+    nm = NearMiss(random_state=seed, version=version, n_neighbors=n_neighbors, n_neighbors_ver3=n_neighbors_ver3, n_jobs=-1, ratio=None, sampling_strategy=sampling_strategy)
     print('Before NearMiss version ' + str(version) + ' undersampling : ', sorted(Counter(Y_train).items()))
-    X_train_resampled, Y_train_resampled = nm.fit_resample(X, y)
+    X_train_resampled, Y_train_resampled = nm.fit_resample(X_train, Y_train)
     print('After NearMiss version ' + str(version) + ' undersampling : ', sorted(Counter(Y_train_resampled).items()))
 
     return X_train_resampled, Y_train_resampled
@@ -118,12 +125,12 @@ def IHT_undersampling(X_train, Y_train, seed, sampling_strategy, estimator='adab
 
     iht = InstanceHardnessThreshold(estimator=estimator, random_state=seed, cv=cv, n_jobs=-1, sampling_strategy=sampling_strategy)
     print('Before Cluster Centroid undersampling : ', sorted(Counter(Y_train).items()))
-    X_train_resampled, Y_train_resampled = cc.fit_resample(X, y)
+    X_train_resampled, Y_train_resampled = cc.fit_resample(X_train, Y_train)
     print('After Cluster Centroid undersampling : ', sorted(Counter(Y_train_resampled).items()))
 
     return X_train_resampled, Y_train_resampled
 
-#####Combination of Undersampling and Oversampling methods#####
+#############################################################Combination of Oversampling and Undersampling Methods#################################################################
 
 def SMOTE_ENN(X_train, Y_train, seed, sampling_strategy, k_neighbors_smote=5, n_neighbors_enn=3, kind_sel='all'):
     enn = EditedNearestNeighbours(random_state=seed, n_jobs=-1, n_neighbors=n_neighbors_enn, kind_sel=kind_sel, sampling_strategy=sampling_strategy)

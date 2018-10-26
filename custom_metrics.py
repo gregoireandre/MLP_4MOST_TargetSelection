@@ -1,18 +1,24 @@
+# This module defines a special keras callback that computes metrics that are not
+# available in keras defautl Metrics. Being a callback, those methods are called
+# between each epochs which can slow down the training of the model
+# For mor info about keras callbacks and their attributes : https://keras.io/callbacks/
+
 import keras
 import numpy as np
 from sklearn.metrics import classification_report
 from utils import *
 
-
-
 class Metrics(keras.callbacks.Callback):
 
+    # Method run at beginning of train
 
     def on_train_begin(self, logs={}):
         self.macro_f1s = []
         self.macro_precision = []
         self.macro_recall = []
         self.epochs = []
+
+    # Method run at the end of each epoch
 
     def on_epoch_end(self, epoch, logs={}):
         Y_pred = np.argmax(self.model.predict(self.validation_data[0]), axis=-1)

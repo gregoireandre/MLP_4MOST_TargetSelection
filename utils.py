@@ -1,7 +1,12 @@
 import os
+import csv
 import math
+import copy
+import itertools
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from astropy.io import fits
 from sklearn.metrics import auc, confusion_matrix
 from sklearn.preprocessing import OneHotEncoder
@@ -30,38 +35,20 @@ def report2dict(cr):
                 D_class_data[class_label][m.strip()] = float(row[j + 1].strip())
     return D_class_data
 
-def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classification_problem, train_test_split, dataset_idx, cv_fold_nbr, others_flag, model_path, preprocessing, early_stopped_epoch, mean_auc_roc, mean_auc_pr):
-
-    noothers_precision = []
-    noothers_recall = []
-    noothers_f1_score = []
-    noothers_precision_density = []
-
-    for i in list(reportdict.keys()):
-        if ('Others' not in i) and ('avg' not in i):
-            noothers_precision.append(reportdict[i]['precision'])
-            noothers_recall.append(reportdict[i]['recall'])
-            noothers_f1_score.append(reportdict[i]['f1-score'])
-        elif ('Others' in i):
-            others_precision = reportdict[i]['precision']
-            others_recall = reportdict[i]['recall']
-            others_f1_score = reportdict[i]['f1-score']
-
-    noothers_mean_precision = sum(noothers_precision)/len(noothers_precision)
-    noothers_mean_recall = sum(noothers_recall)/len(noothers_recall)
-    noothers_mean_f1_score = sum(noothers_f1_score)/len(noothers_f1_score)
-    all_models_path, model_index = os.path.split(model_path)
+def report2csv(model_index, all_models_path, catalog_filename, constraints, ann_parameters, classification_problem, train_test_split, dataset_idx, cv_fold_nbr, others_flag, data_imputation, model_path, preprocessing, early_stopped_epoch, mean_auc_roc, mean_auc_pr, custom_metrics):
 
     csv_dict_inputs = {'model_index': [model_index],
                        'catalog': [catalog_filename],
                        'classification_problem': [classification_problem],
                        'constraints': [constraints],
                        'others_flag': [others_flag],
+                       'data_imputation': [data_imputation],
                        'train_test_split / train_val_split': [train_test_split],
                        'dataset_idx': [dataset_idx],
                        'cv_fold_nbr': [cv_fold_nbr],
                        'preprocessing': [],
                        'preprocessing_params': []}
+
     if preprocessing is not None:
         for i in preprocessing:
             csv_dict_inputs['preprocessing'].append(i['method'])
@@ -72,14 +59,11 @@ def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classi
 
     csv_dict_performance = {'model_index': [model_index],
                             'early_stop': [early_stopped_epoch],
-                            'auc_pr': [mean_auc_pr],
-                            'auc_roc': [mean_auc_roc],
-                            'precision': [noothers_mean_precision],
-                            'recall': [noothers_mean_recall],
-                            'f1_score': [noothers_mean_f1_score],
-                            'others_precision': [others_precision],
-                            'others_recall': [others_recall],
-                            'others_f1_score': [others_f1_score]}
+                            'macro_precision': [custom_metrics.macro_precision],
+                            'macro_recall': [custom_metrics.macro_recall],
+                            'macro_f1score': [custom_metrics.macro_f1s],
+                            'mean_auc_pr': [mean_auc_pr],
+                            'mean_auc_roc': [mean_auc_roc]}
 
     csv_dict_parameters = {'model_index': [model_index]}
 
@@ -114,6 +98,8 @@ def report2csv(reportdict, catalog_filename, constraints, ann_parameters, classi
     else:
         pd.DataFrame.from_dict(csv_dict_performance).to_csv(benchmark_filename, index=False)
 
+    return
+
 def read_fits(full_path):
 
     hdu = fits.open(full_path)
@@ -128,6 +114,26 @@ def read_fits(full_path):
         data_array[:,i] = data.field(i)
 
     return data_array
+
+def read_fits_as_dict(full_path):
+
+    ####role####
+    # Read a .fits file and returns the data and keys contained in the latter.
+
+    ####inputs####
+    # path : path of the .fits file to load
+    # filename : filename of the .fits file to load
+
+    ####outputs####
+    # data_keys : The keys corresponding to the data inside the .fits file (eg DES_r, HSC_zphot, ...)
+    # data : Object containing the data of the .fits file. The object has the same behavior than
+    # python dictionnary (eg to access all the DES_r data just type data['DES_r'])
+
+    hdu = fits.open(full_path)
+    data = hdu[1].data
+    data_keys = hdu[1].columns.names
+
+    return data, data_keys
 
 def constraints_to_str(constraints):
 
@@ -166,52 +172,107 @@ def compute_classnames(classification_problem, others_flag):
 
     return classnames
 
-def compute_aucs(Y_pred, Y_val, classnames):
+def compute_aucs(Y_pred, Y_val, X_val_id, classnames, savepath=None, plot=False):
 
-    thresholds = list(np.linspace(0.05, 0.95, 19, endpoint=True))
+    thresholds = list(np.linspace(0.00, 0.95, 20, endpoint=True))
     thresholds = [ round(elem, 2) for elem in thresholds ]
     fpr = {}
     tpr = {}
     ppv = {}
     auc_pr = []
     auc_roc = []
+    nbr_classes = len(classnames)
 
-    for  i in thresholds.copy():
-        conf_matr, nbr_classes = compute_conf_matr(Y_val, Y_pred, i, classnames)
+    norm_fig = plt.figure(1, figsize=(19.2,12), dpi=100)
+    norm_fig.subplots_adjust(left  = 0.1, bottom = 0.05, right = 0.9, top = 1.0, wspace = 0.9, hspace = 0.65)
+
+    fig = plt.figure(2, figsize=(19.2,12), dpi=100)
+    fig.subplots_adjust(left  = 0.1, bottom = 0.05, right = 0.9, top = 1.0, wspace = 0.9, hspace = 0.65)
+
+    for idxplot, i in enumerate(thresholds.copy()):
+        conf_matr, recall_correction = compute_conf_matr(Y_val, Y_pred, X_val_id, i, savepath)
         if conf_matr.shape[0] == nbr_classes:
-            fpr, tpr, ppv = compute_roc_curve(conf_matr, fpr, tpr, ppv, nbr_classes)
+            fpr, tpr, ppv = compute_roc_pr_curve(conf_matr, fpr, tpr, ppv, nbr_classes, recall_correction)
+            if plot:
+                plot_confusion_matrix(conf_matr, classnames, idxplot, i, tpr, ppv, savepath, True, 1)
+                plot_confusion_matrix(conf_matr, classnames, idxplot, i, tpr, ppv, savepath, False, 2)
         else:
             thresholds.remove(i)
 
-    for i in list(fpr.keys()):
-        auc_pr.append(np.trapz(tpr[i], ppv[i]))
-        auc_roc.append(np.trapz(fpr[i], tpr[i]))
+    fpr_roc = {}
+    tpr_roc = {}
+    tpr_pr = {}
+    ppv_pr = {}
+
+    for k in range(nbr_classes):
+        idx_redordering = np.argsort(fpr[k])
+        fpr_roc[k] = [fpr[k][h] for h in idx_redordering]
+        tpr_roc[k] = [tpr[k][h] for h in idx_redordering]
+        thresholds_roc = [thresholds[h] for h in idx_redordering]
+        auc_roc.append(np.trapz(y=([0] + tpr_roc[k] + [1]), x=([0] + fpr_roc[k] + [1])))
+
+    if plot:
+        plt.close(1)
+        plt.close(2)
+        plot_roc_curve(fpr_roc, tpr_roc, ppv, thresholds_roc, nbr_classes, classnames, savepath, auc_roc)
+
+    for k in range(nbr_classes):
+        idx_redordering =  np.argsort(tpr[k])
+        tpr_pr[k] = [tpr[k][h] for h in idx_redordering]
+        ppv_pr[k] = [ppv[k][h] for h in idx_redordering]
+        thresholds_pr = [thresholds[h] for h in idx_redordering]
+        auc_pr.append(np.trapz(y=([1] + ppv_pr[k] + [0]), x=([0] + tpr_pr[k] + [1])))
+
+    if plot:
+        plt.close()
+        plot_pr_curve(fpr, tpr_pr, ppv_pr, thresholds_pr, nbr_classes, classnames, savepath, auc_pr)
 
     mean_auc_pr = sum(auc_pr)/len(auc_pr)
     mean_auc_roc = sum(auc_roc)/len(auc_roc)
 
     return mean_auc_roc, mean_auc_pr
 
-def compute_conf_matr(Y_val, Y_pred, threshold, classnames):
+def compute_conf_matr(Y_val, Y_pred, X_val_id, threshold, savepath):
 
-    n_classes = len(classnames)
-    y_pred_non_category = []
+    unique, counts = np.unique(np.argmax(Y_val, axis=-1), return_counts=True)
+    class_count_dict = dict(zip(unique, counts))
+    nbr_classes = len(list(class_count_dict.keys()))
+    Y_pred_non_category = []
     Y_val_non_category = []
+    DES_id = []
     title = 'Threshold = ' + str(threshold)
+    discard_count_dict = {}
+    for i in list(class_count_dict.keys()):
+        discard_count_dict[i] = 0
+    recall_correction = {'macro': 0, 'micro': 0}
     for idxj, j in enumerate(Y_pred):
         if np.amax(j) >= threshold:
             Y_val_non_category.append(np.argmax(Y_val[idxj]))
-            y_pred_non_category.append(np.argmax(Y_pred[idxj]))
-    cm = confusion_matrix(Y_val_non_category, y_pred_non_category)
+            Y_pred_non_category.append(np.argmax(Y_pred[idxj]))
+            DES_id.append(X_val_id[idxj])
+        else:
+            discard_count_dict[np.argmax(Y_val[idxj])] += 1
 
-    return cm, n_classes
+    for i in list(class_count_dict.keys()):
+        recall_correction[i] = 1 - discard_count_dict[i]/class_count_dict[i]
+        recall_correction['macro'] += recall_correction[i]
 
-    return
+    recall_correction['macro'] = recall_correction['macro']/nbr_classes
+    recall_correction['micro'] = 1 - sum(list(discard_count_dict.values()))/(sum(list(class_count_dict.values())))
 
-def compute_roc_curve(confusion_matrix, fpr, tpr, ppv, n_classes):
+    if savepath is not None:
+        prediction_report = {'DES_id': DES_id, 'Y_true': Y_val_non_category, 'Y_pred': Y_pred_non_category}
+        prediction_report_path, _ = os.path.split(savepath)
+        pd.DataFrame.from_dict(prediction_report).to_csv(os.path.join(prediction_report_path, 'Predictions_' + str(threshold) + '.csv'), index=False)
 
-    # Plot linewidth.
-    lw = 2
+    cm = confusion_matrix(Y_val_non_category, Y_pred_non_category)
+
+    return cm, recall_correction
+
+def compute_roc_pr_curve(confusion_matrix, fpr, tpr, ppv, n_classes, recall_correction):
+
+    tpr['macro'] = 0.0
+    ppv['macro'] = 0.0
 
     for i in range(n_classes):
         TP = confusion_matrix[i][i]
@@ -223,16 +284,178 @@ def compute_roc_curve(confusion_matrix, fpr, tpr, ppv, n_classes):
                 FP += confusion_matrix[j][i]
                 FN += confusion_matrix[i][j]
                 TN += confusion_matrix[j][j]
-        print('class : ', i, ' FP : ', FP, ' FN : ', FN , ' TN : ', TN, ' TP : ', TP)
-        if (i in list(tpr.keys())) and (i in list(fpr.keys())):
-            tpr[i].append(TP/(TP+FN))
+        # print('class : ', i, ' FP : ', FP, ' FN : ', FN , ' TN : ', TN, ' TP : ', TP)
+        if (i in list(tpr.keys())) and (i in list(fpr.keys())) and (i in list(ppv.keys())):
+            tpr[i].append(TP/(TP+FN)*recall_correction[i])
             fpr[i].append(FP/(FP+TN))
             ppv[i].append(TP/(FP+TP))
         else:
-            tpr[i] = [TP/(TP+FN)]
+            tpr[i] = [TP/(TP+FN)*recall_correction[i]]
             fpr[i] = [FP/(FP+TN)]
             ppv[i] = [TP/(FP+TP)]
+        tpr['macro'] += tpr[i][-1]
+        ppv['macro'] += ppv[i][-1]
+
+    tpr['macro'] = tpr['macro']/n_classes
+    ppv['macro'] = ppv['macro']/n_classes
+
     return fpr, tpr, ppv
+
+def plot_confusion_matrix(cm, target_names, idx_plot, threshold, tpr, ppv, savepath, normalize, figure_index):
+
+    plt.figure(figure_index)
+    title='Threshold = {:0.2f}'.format(threshold)
+
+    macro_recall = tpr['macro']
+    macro_precision = ppv['macro']
+
+    cmap = plt.get_cmap('Blues')
+
+    plt.subplot(4, 5, idx_plot + 1)
+    im = plt.imshow(cm, interpolation='nearest', cmap=cmap)
+
+    if target_names is not None:
+        tick_marks = np.arange(len(target_names))
+        plt.xticks(tick_marks, target_names, rotation=45)
+        plt.yticks(tick_marks, target_names)
+
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+    thresh = cm.max() / 1.5 if normalize else cm.max() / 2
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        if normalize:
+            plt.text(j, i, "{:0.4f}".format(cm[i, j]),
+                     horizontalalignment="center",
+                     color="yellow" if cm[i, j] > thresh else "black", fontsize=6)
+        else:
+            plt.text(j, i, "{:,}".format(cm[i, j]),
+                     horizontalalignment="center",
+                     color="yellow" if cm[i, j] > thresh else "black", fontsize=6)
+
+
+    # plt.tight_layout()
+    plt.ylabel(title + '\nTrue label')
+    plt.xlabel('[macro] recall={:0.2f}; precision={:0.2f}'.format(macro_recall, macro_precision))
+    ax = plt.gca()
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    plt.colorbar(im, cax=cax)
+    if normalize:
+        plt.savefig(os.path.join(savepath, 'cm_norm.png'))
+    else:
+        plt.savefig(os.path.join(savepath, 'cm.png'))
+
+    return
+
+def plot_roc_curve(fpr, tpr, ppv, thresholds, n_classes, classnames, savepath, auc_roc):
+
+    colors = ['blue', 'brown', 'cyan', 'red', 'yellow', 'magenta', 'lime', 'orange', 'purple', 'lightgray', 'gold', 'darkblue', 'tan', 'olive', 'turquoise', 'pink', 'darkgreen', 'gray', 'lightsalmon', 'black']
+
+    thresholds_copy = thresholds.copy()
+    colors_copy = colors.copy()
+    for i in range(n_classes):
+
+        plt.figure(figsize=(19.2,10.8), dpi=100)
+        for idxj, j in enumerate(thresholds_copy):
+            plt.scatter(fpr[i][idxj], tpr[i][idxj], color=colors_copy[idxj],
+                     label='Threshold = {0})'
+                     ''.format(thresholds_copy[idxj]))
+        plt.step([0] + fpr[i] + [1],[0] + tpr[i] + [1], linestyle=':', lw=1, color='black')
+        plt.plot([0, 1], [0, 1], 'k--', lw=2)
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Area Under Curve of class {} : {:0.2f}'.format(classnames[i], auc_roc[i]))
+        plt.legend(loc="lower right")
+        plt.savefig(os.path.join(savepath, 'roc_' + classnames[i] + '.png'))
+        plt.close()
+
+    return
+
+def plot_pr_curve(fpr, tpr, ppv, thresholds, n_classes, classnames, savepath, auc_pr):
+
+    colors = ['blue', 'brown', 'cyan', 'red', 'yellow', 'magenta', 'lime', 'orange', 'purple', 'lightgray', 'gold', 'darkblue', 'tan', 'olive', 'turquoise', 'pink', 'darkgreen', 'gray', 'lightsalmon', 'black']
+
+    thresholds_copy = thresholds.copy()
+    colors_copy = colors.copy()
+    for i in range(n_classes):
+
+        plt.figure(figsize=(19.2,10.8), dpi=100)
+        for idx in range(len(thresholds_copy)):
+            plt.scatter(tpr[i][idx], ppv[i][idx], color=colors_copy[idx],
+                     label='Threshold = {0})'
+                     ''.format(thresholds_copy[idx]))
+        plt.step([0] + tpr[i] + [1],[0] + ppv[i] + [0], linestyle=':' ,lw=1, color='black')
+        plt.plot([0, 1], [0, 0], 'k--', lw=2)
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.title('Area Under Curve of class {} : {:0.2f}'.format(classnames[i], auc_pr[i]))
+        plt.legend(loc="best")
+        plt.savefig(os.path.join(savepath, 'pr_curve_' + classnames[i] + '.png'))
+        plt.close()
+
+    return
+
+def csv2dict_list(csv_path):
+
+    # Open variable-based csv, iterate over the rows and map values to a list of dictionaries containing key/value pairs
+
+    with open(csv_path) as f:
+        dict_list = [ {k:v for k, v in row.items()} for row in csv.DictReader(f, skipinitialspace=True)]
+    print(type(dict_list[0]['train_test_split / train_val_split']))
+    return dict_list
+
+def format_csv_dict(model_input):
+
+    if model_input['preprocessing']:
+        model_input_preprocessing_method = []
+        model_input['preprocessing'] = (model_input['preprocessing'][1:-1]).split(',')
+        model_input['preprocessing_params'] = (model_input['preprocessing'][1:-1]).split(',')
+        for i in range(len(model_input['preprocessing'])):
+            model_input_preprocessing.append({'method': model_input['preprocessing'][i], 'arguments': model_input['preprocessing_params'][i]})
+        model_input['preprocessing_method'] = model_input_preprocessing_method
+    else:
+        model_input['preprocessing_method'] = None
+
+    model_input_training_testing_split = []
+    model_input['train_test_split / train_val_split'] = (model_input['train_test_split / train_val_split'][1:-1]).split(',')
+    for i in range(len(model_input['train_test_split / train_val_split'])):
+        model_input_training_testing_split.append(int(model_input['train_test_split / train_val_split'][i]))
+    model_input['training_testing_split'] = model_input_training_testing_split
+
+    model_input['dataset_idx'] = int(model_input['dataset_idx'])
+    model_input['cv_fold_nbr'] = int(model_input['cv_fold_nbr'])
+    model_input['data_imputation'] = float(model_input['data_imputation'])
+
+    return model_input
+
+def get_model_weights_path(model_path, weights_flag):
+
+    for file in os.listdir(model_path):
+        if file.endswith(".hdf5"):
+            final_model_weights = os.path.join(model_path, file)
+            final_model_score = float((file.split('-')[1]).split('_')[-1])
+            if weights_flag == 'final':
+                return final_model_weights
+
+    for file in os.listdir(os.path.join(model_path, 'checkpoints')):
+        if file.endswith(".hdf5"):
+            checkpoint_model_weights = os.path.join(model_path, 'checkpoints', file)
+            checkpoint_score = float((file.split('-')[1]).split('_')[-1])
+            if weights_flag == 'checkpoint':
+                return checkpoint_model_weights
+
+    if weights_flag == 'best':
+        if checkpoint_score > final_model_score:
+            return checkpoint_model_weights
+        else:
+            return final_model_weights
+
+    return
 
 #######Dataset processing methods#########
 
