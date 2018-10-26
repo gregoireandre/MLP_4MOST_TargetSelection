@@ -71,7 +71,7 @@ classification.py
 evaluate.py
 ```
 
-As stated in their names, those scripts alloes to respectively generate the datasets from a catalog,  train a classifier on those datasets and evaluate its performance.
+As stated in their names, those scripts allow to respectively generate the datasets from a catalog,  train a classifier on those datasets and evaluate its performances.
 
 ### Generate Training, Validation and Testing Datasets
 
@@ -82,18 +82,20 @@ python dataset_generator.py
 ```
 
 The script allows to generate various datasets from a single catalog and the user should adapt the scripts parameters depending on the problem considered.
-The script parameters are defined as global variables at the end of the script, their definitions as well as their values are described in the script itself.
+The script is build around the "Classification_dataset_generator" class which uses arguments given in its initialization to compute and save datasets.
 
 If the script ran successfully, a new folder named "datasets" should have appeared in the "src" folder.
 The later should have the following architecture :
 
 ```
 datasets/
-	Catalog_filename/
-		Constraints/
-			<Classification problem>_<train/val/test>_<train split>_<test split>_<dataset index>_<cv fold number>.fits
+	<catalog_filename>/
+		<constraints>/
+			<classification_problem>_<train/val/test>_<train_split>_<test_split>_<dataset_index>_<cv_fold_number>.fits
 			...
 ```
+
+where <catalog_filename>, <constraints>, <classification_problem>, <train/val/test>, <train_split>, <test_split>, <dataset_index>, <cv_fold_number> are the parameters given to the "Classification_dataset_generator" object. Those parameters are introduced and defined in the comments of the dataset_generator.py script.
 
 ### Train an algorithm
 
@@ -104,7 +106,8 @@ python classification.py
 ```
 
 The script allows to train different classifiers such as Random Forest, Support Vector Machine or Multi-Layer Perceptron.
-As it is the case for the generation of the dataset, one should adapt the bottom of the script to decide which classifier, dataset and preprocessing techniques to use.
+As it is the case for the generation of the dataset, the script is built around a class : "Classification".
+One should adapt the arguments in the initialization of the Classification object to decide which classifier, dataset and preprocessing techniques to use.
 
 After execution, the script store the results and saved model with the following architecture :
 
@@ -112,24 +115,20 @@ After execution, the script store the results and saved model with the following
 model_ANN/
 	<model_index>/
 		checkpoints/
-			<model_name>_<epoch>_<metric_score>.hdf5
+			ANN_checkpoints_<number of epochs at checkpoint>-epo_<metric_score>-<metric_name>.hdf5
 			...
 		figures/
-			<model_name>_<metric_score>.png
-			<model_name>_loss.png
+			ANN_validation_score.png
+			ANN_loss.png
 		tsboard/
 			<tensoboard files>
-		<model_name>.json (model architecture saved as json format)
-		ann_parameters.json (model input parameters saved as dictionnary in json format)
-		<model_name>_<epoch>_<metric_score>.hdf5 (final model weights at end of training)
+		ANN_architecture.json (model architecture saved as json format)
+		ANN_parameters.json (model input parameters saved as dictionnary in json format)
+		ANN_weights_<number of epochs>-epo_<metric_score>-<metric_name>.hdf5 (final model weights at end of training)
 		<model_name>_report.txt (model classification performances report on validation data)
 	Benchmnark_ANN_inputs.csv (Table that summarizes the inputs used in classification.py for each model)
 	Benchmnark_ANN_parameters.csv (Table that summarizes the inputs used in the neural network for each model)
 	Benchmnark_ANN_performances.csv (Table that summarizes the performances of each model on validation data)
-model_RF/
-	TO DO
-model_SVM/
-	TO_DO
 ```
 
 ## Authors
