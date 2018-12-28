@@ -23,30 +23,31 @@ from astropy.io import fits
 
 class Classification():
 
-    def __init__(self, classifier='ANN', preprocessing_method=None, random_seed=7, catalog_filename='4MOST.CatForGregoire.05Dec2018.zphot', classification_problem='BG_LRG_ELG_QSO_classification', constraints='no', data_imputation=0.0, normalization='cr', train_test_val_split=[80, 20, 20], cv_fold_nbr=1, cross_validation=False, tsboard=False, early_stop=True, lrdecay=True, model_path=None, model_index=None, zphot_safe_threshold=0.0, ANN_zphot_idx=None):
+    def __init__(self, classifier='ANN', preprocessing_method=None, random_seed=7, catalog_filename='4MOST.CatForGregoire.11Oct2018.zphot', classification_problem='BG_LRG_ELG_QSO_classification', constraints='no', data_imputation=0.0, normalization='cr', train_test_val_split=[80, 20, 20], cv_fold_nbr=1, cross_validation=False, tsboard=False, early_stop=True, lrdecay=True, compute_conf_matr=False, model_path=None, model_index=None, ANN_zphot=None):
 
-        self.classifier = classifier                                            # classifier (string) : 'ANN', 'RF', 'SVM'
-        self.preprocessing_method = preprocessing_method                        # preprocessing_method (list of dict) : {'method' : 'method to use among preprocessing_classification.py', 'arguments': [arg1, arg2, arg3, ...]}
-        self.random_seed = random_seed                                          # random_seed (int) : Random seed to use for reproducibility
-        self.catalog_filename = catalog_filename                                # catalog_filename (string) : Filename of the catalog to use (must be a .fits and located in "src" folder)
-        self.classification_problem = classification_problem                    # classification_problem (string) : Classification problem to consider (see dataset_generator.py for details about different classification problem)
-        self.constraints= constraints                                           # constraints (str or dict) : Constraints to use on the dataset (see dataset_generator.py for details about different classification problem)
-        self.data_imputation = data_imputation                                  # data_imputation (float) : Value used while generating the dataset to fill empty entries
-        self.normalization = normalization                                      #
-        self.train_test_val_split = train_test_val_split                        # train_test_val_split (list) : Fraction of dataset to use on training/testing and on training/validation (e.g [80, 20])
-        self.cv_fold_nbr = cv_fold_nbr                                          # cv_fold_nbr (int) : The index of the cross validation dataset to use (refer to dataset_generator.py for more info)
+        self.classifier = classifier                                            # Classifier (str) : 'ANN', 'RF', 'SVM'
+        self.preprocessing_method = preprocessing_method                        # Processing method (dict) : {'method' : 'method to use among preprocessing.py', 'arguments': [arg1, arg2, arg3, ...]}
+        self.random_seed = random_seed                                          # Random seed (int) : Random seed to use for reproducibility
+        self.catalog_filename = catalog_filename                                # Catalog Filename (str) : Filename of the catalog to use (must be a .fits and located in "src" folder)
+        self.classification_problem = classification_problem                    # Classification problem (str) : Classification problem to consider (see dataset_generator.py for details about different classification problem)
+        self.constraints= constraints                                           # Constraints (str or dict) : Constraints to use on the dataset (see dataset_generator.py for details about different classification problem)
+        self.data_imputation = data_imputation                                  # Data imputation (float) : Value used while generating the dataset to fill empty entries
+        self.normalization = normalization
+        self.train_test_val_split = train_test_val_split                    # Train Test split (list) : Fraction of dataset to use on training/testing and on training/validation (e.g [80, 20])
+        self.cv_fold_nbr = cv_fold_nbr                                          # Cross Validation fold number (int) : The index of the cross validation dataset to use (refer to dataset_generator.py for more info)
         self.cross_validation = cross_validation                                # Cross Validation (bool) : Weither or not use cross validation during evaluation of the model
         self.tsboard = tsboard                                                  # Tensorboard (bool) : Weither or not use tensorboard callback during training of the model
         self.early_stop = early_stop                                            # Early Stop (bool) : Weither or not use early stop callback during training of the model
         self.lrdecay = lrdecay                                                  # Learning Rate decay (bool) : Weither or not use learning rate plateau decay callback during training of the model
+        self.compute_conf_matr = compute_conf_matr                              # Compute Confusion Matrix (bool) : Weither or not compute confusion matrix and save to png during model evalutation
         self.model_index = model_index
         self.model_path = model_path
-        self.zphot_safe_threshold = zphot_safe_threshold
-        self.ANN_zphot_idx = ANN_zphot_idx
+        self.ANN_zphot = ANN_zphot
 
         np.random.seed(self.random_seed)                                        # Fix Numpy random seed for reproducibility
         self.script_path = os.path.realpath(__file__)
         self.script_dir, _ = os.path.split(self.script_path)
+        self.constraints = utils_classification.constraints_to_str(self.constraints)                 # Convert constraints input varibale to str
         self.classnames = utils_classification.compute_classnames(self.classification_problem)
 
         self.input_dict = {
@@ -58,16 +59,15 @@ class Classification():
                             'constraints': constraints,
                             'data_imputation': data_imputation,
                             'normalization': normalization,
-                            'zphot_safe_threshold': self.zphot_safe_threshold,
                             'train_test_val_split': train_test_val_split,
                             'cv_fold_nbr': cv_fold_nbr,
                             'cross_validation': cross_validation,
                             'tsboard': tsboard,
                             'early_stop': early_stop,
                             'lrdecay': lrdecay,
+                            'compute_conf_matr': compute_conf_matr,
                             'random_seed': random_seed,
-                            'constraints': constraints,
-                            'ANN_zphot_idx': self.ANN_zphot_idx
+                            'constraints': constraints
                           }
 
         self.dataset_path = os.path.join(self.script_dir, 'datasets', self.catalog_filename, self.constraints + '-constraints')
@@ -106,8 +106,9 @@ class Classification():
 
     def load_dataset(self):
 
-        self.DES_id_train, self.X_train, self.Y_train, self.zphot_train, self.sample_weights_train, self.DES_id_val, self.X_val, self.Y_val, self.zphot_val, self.sample_weights_val, self.DES_id_test, self.X_test, self.Y_test, self.zphot_test, self.sample_weights_test, self.data_keys, self.data_keys_train = utils_classification.load_dataset(self.dataset_path, self.model_path, self.classification_problem, self.zphot_safe_threshold, self.train_test_val_split, self.cv_fold_nbr, self.normalization, self.data_imputation, self.random_seed)
-        self.color_cut_performances = utils_classification.compute_color_cuts_performances(self.X_train, self.zphot_train, self.X_val, self.zphot_val, self.X_test, self.zphot_test, self.data_keys_train)
+        self.DES_id_train, self.X_train, self.Y_train, self.sample_weights_train, self.DES_id_val, self.X_val, self.Y_val, self.sample_weights_val, self.DES_id_test, self.X_test, self.Y_test, self.sample_weights_test, self.data_keys = utils_classification.load_dataset(self.dataset_path, self.model_path, self.classification_problem, self.train_test_val_split, self.cv_fold_nbr, self.normalization, self.data_imputation, self.random_seed)
+        # self.X_train_norm, self.X_val_norm, self.X_test_norm, self.data_imputation_values = utils_classification.fill_empty_entries_dataset(self.X_train, self.X_val,self. X_test, self.data_imputation, self.constraints)
+        # self.X_train_norm, self.X_val_norm, self.X_test_norm, self.normalizer = utils_classification.normalize_dataset(self.X_train_norm, self.X_val_norm, self.X_test_norm, self.normalization, self.random_seed)
         self.X_train_norm, self.X_val_norm, self.X_test_norm, self.normalizer = utils_classification.normalize_dataset(self.X_train, self.X_val,self. X_test, self.normalization, self.random_seed)
         self.X_train_norm, self.X_val_norm, self.X_test_norm, self.data_imputation_values = utils_classification.fill_empty_entries_dataset(self.X_train_norm, self.X_val_norm, self.X_test_norm, self.data_imputation, self.constraints)
         if self.preprocessing_method is not None:
@@ -126,79 +127,25 @@ class Classification():
                         self.X_train_norm, self.Y_train = getattr(preprocessing_classification, i['method'])(self.X_train_norm, self.Y_train, self.random_seed, i['arguments'][0], i['arguments'][1], i['arguments'][2])
                     elif len(i['arguments']) == 4:
                         self.X_train_norm, self.Y_train = getattr(preprocessing_classification, i['method'])(self.X_train_norm, self.Y_train, self.random_seed, i['arguments'][0], i['arguments'][1], i['arguments'][2], i['arguments'][3])
+                preprocessing_classification.save_preprocessed_dataset(self.script_dir, self.catalog_filename, self.constraints, self.data_imputation, self.normalization, self.classification_problem, self.train_test_val_split, self.cv_fold_nbr, self.preprocessing_method, self.X_train_norm, self.Y_train)
 
-                preprocessing_classification.save_preprocessed_dataset(self.script_dir, self.catalog_filename, self.constraints, self.data_imputation, self.normalization, self.classification_problem, self.zphot_safe_threshold, self.train_test_val_split, self.cv_fold_nbr, self.preprocessing_method, self.X_train_norm, self.Y_train, self.data_keys_train)
+        # if self.ANN_zphot is not None:
+        #     self.X_train_norm = utils_classification.unapply_reduce_center(self.X_train_norm, self.normalizer)
+        #     self.X_val_norm = utils_classification.unapply_reduce_center(self.X_val_norm, self.normalizer)
+        #     self.compute_zphot_regressor('ANN', 126)
+        #
+        # self.X_train_norm[:, :-2] = utils_classification.apply_normalization(self.X_train_norm[:, :-2], self.normalization, self.normalizer)
+        # self.X_train_norm[:, -2] = (self.X_train_norm[:, -2] - np.mean(self.X_train_norm[:, -2]))/np.std(self.X_train_norm[:, -2])
+        # self.X_train_norm[:, -1] = (self.X_train_norm[:, -1] - np.mean(self.X_train_norm[:, -1]))/np.std(self.X_train_norm[:, -1])
+        #
+        # self.X_val_norm[:, :-2] = utils_classification.apply_normalization(self.X_val_norm[:, :-2], self.normalization, self.normalizer)
+        # self.X_val_norm[:, -2] = (self.X_val_norm[:, -2] - np.mean(self.X_val_norm[:, -2]))/np.std(self.X_val_norm[:, -2])
+        # self.X_val_norm[:, -1] = (self.X_val_norm[:, -1] - np.mean(self.X_val_norm[:, -1]))/np.std(self.X_val_norm[:, -1])
 
-        if self.ANN_zphot_idx is not None:
-            self.X_train_norm = utils_classification.unapply_reduce_center(self.X_train_norm, self.normalizer)
-            self.X_val_norm = utils_classification.unapply_reduce_center(self.X_val_norm, self.normalizer)
-            self.compute_zphot_from_regressor('ANN', self.ANN_zphot_idx)
+        # preprocessing_classification.save_preprocessed_dataset(self.script_dir, self.catalog_filename, self.constraints + '+ANNzphot', self.data_imputation, self.normalization, self.classification_problem, self.train_test_val_split, self.cv_fold_nbr, self.preprocessing_method, self.X_train_norm, self.Y_train)
 
         self.input_dimensions = self.X_train_norm.shape[1]
         self.nbr_classes = np.unique(self.Y_test).shape[0]
-        return
-
-    def compute_zphot_from_regressor(self, regressor, model_index_zphot, weights_flag='final'):
-
-        script_path = os.path.realpath(__file__)
-        script_dir, _ = os.path.split(script_path)
-        model_path = os.path.join(script_dir, 'model_' + regressor + '_regression', str(model_index))
-        if regressor == 'ANN':
-            with open(os.path.join(model_path, 'ANN_architecture.json')) as f:
-                ANN_architecture = json.load(f)
-            with open(os.path.join(model_path,'ANN_parameters.json')) as f:
-                ANN_parameters = json.load(f)
-            with open(os.path.join(model_path,'regression_inputs.json')) as f:
-                regression_inputs = json.load(f)
-
-            restored_object = Regression(regressor='ANN',
-                                         preprocessing_method=regression_inputs['preprocessing_method'],
-                                         catalog_filename=regression_inputs['catalog_filename'],
-                                         regression_problem=regression_inputs['regression_problem'],
-                                         constraints=regression_inputs['constraints'],
-                                         data_imputation=regression_inputs['data_imputation'],
-                                         normalization=regression_inputs['normalization'],
-                                         train_test_val_split=regression_inputs['train_test_val_split'],
-                                         cv_fold_nbr=regression_inputs['cv_fold_nbr'],
-                                         cross_validation=regression_inputs['cross_validation'],
-                                         tsboard=regression_inputs['tsboard'],
-                                         early_stop=regression_inputs['early_stop'],
-                                         lrdecay=regression_inputs['lrdecay'],
-                                         zphot_safe_threshold=regression_inputs['zphot_safe_threshold'],
-                                         model_index = model_index,
-                                         model_path = model_path
-                                        )
-
-            restored_object.load_dataset()
-            restored_object.load_ANN(weights_flag)
-
-            dummy_des_id = np.ones(self.X_train_norm.shape[0])
-            dummy_z_spec = np.ones(self.X_train_norm.shape[0])
-            X_train_zphot = np.zeros((self.X_train_norm.shape[0], self.X_train_norm.shape[1] + 2))
-            X_val_zphot = np.zeros((self.X_val_norm.shape[0], self.X_val_norm.shape[1] + 2))
-
-            zphot_pdf_train, HSC_statistics_dict_train, metaphor_statistics_dict_train = utils_regression.compute_PDF(restored_object.normalization, restored_object.normalizer, restored_object.data_imputation_values, dummy_des_id, self.X_train_norm, dummy_z_spec, restored_object.model, 100, 0.9, 1, 0.05)
-            zphot_pdf_val, HSC_statistics_dict_val, metaphor_statistics_dict_val = utils_regression.compute_PDF(restored_object.normalization, restored_object.normalizer, restored_object.data_imputation_values, dummy_des_id, self.X_val_norm, dummy_z_spec, restored_object.model, 100, 0.9, 1, 0.05)
-
-            X_train_zphot[:, -2] = HSC_statistics_dict_train['z_peak']['value']
-            X_train_zphot[:, -1] = (1-HSC_statistics_dict_train['z_peak']['risk'])*HSC_statistics_dict_train['z_peak']['conf']
-            X_val_zphot[:, -2] = HSC_statistics_dict_val['z_peak']['value']
-            X_val_zphot[:, -1] = (1-HSC_statistics_dict_val['z_peak']['risk'])*HSC_statistics_dict_val['z_peak']['conf']
-
-            self.X_val_norm = X_val_zphot
-            self.data_keys_train.append('z_peak')
-            self.data_keys_train.append('Z_conf_risk')
-
-            self.X_train_norm[:, :-2] = utils_classification.apply_normalization(self.X_train_norm[:, :-2], self.normalization, self.normalizer)
-            self.X_train_norm[:, -2] = (self.X_train_norm[:, -2] - np.mean(self.X_train_norm[:, -2]))/np.std(self.X_train_norm[:, -2])
-            self.X_train_norm[:, -1] = (self.X_train_norm[:, -1] - np.mean(self.X_train_norm[:, -1]))/np.std(self.X_train_norm[:, -1])
-
-            self.X_val_norm[:, :-2] = utils_classification.apply_normalization(self.X_val_norm[:, :-2], self.normalization, self.normalizer)
-            self.X_val_norm[:, -2] = (self.X_val_norm[:, -2] - np.mean(self.X_val_norm[:, -2]))/np.std(self.X_val_norm[:, -2])
-            self.X_val_norm[:, -1] = (self.X_val_norm[:, -1] - np.mean(self.X_val_norm[:, -1]))/np.std(self.X_val_norm[:, -1])
-
-            preprocessing_classification.save_preprocessed_dataset(self.script_dir, self.catalog_filename, self.constraints + '_' + str(self.ANN_zphot_idx) + '-ANN_zphot', self.data_imputation, self.normalization, self.classification_problem, self.zphot_safe_threshold, self.train_test_val_split, self.cv_fold_nbr, self.preprocessing_method, self.X_train_norm, self.Y_train, self.data_keys_train)
-
         return
 
     def check_existing_preprocessed_datasets(self):
@@ -231,7 +178,7 @@ class Classification():
 
     def load_preprocessed_dataset(self, preprocessing_methods):
 
-        preprocessed_dataset_path = os.path.join(self.dataset_path, 'preprocessed_' + str(self.data_imputation) + '-imputation', self.classification_problem + '_' + str(self.zphot_safe_threshold) + '-zsafe' + '_train_' + str(self.train_test_val_split[0]) + '_' + str(self.train_test_val_split[1]) + '_' + str(self.cv_fold_nbr) + '_norm-' + str(self.normalization))
+        preprocessed_dataset_path = os.path.join(self.dataset_path, 'preprocessed_' + str(self.data_imputation) + '-imputation', self.classification_problem + '_train_' + str(self.train_test_val_split[0]) + '_' + str(self.train_test_val_split[1]) + '_' + str(self.cv_fold_nbr) + '_norm-' + str(self.normalization))
         for idx, i in enumerate(preprocessing_methods):
             if idx == 0:
                 preprocessed_dataset_filename = i['method'] + '_' + '_'.join(str(x) for x in i['arguments'])
@@ -242,10 +189,10 @@ class Classification():
         np.random.shuffle(self.training_dataset)
 
         # split into input (X) and output (Y) variables
-        self.X_train_norm = self.training_dataset[:,:-1]
+        self.X_train_os = self.training_dataset[:,:-1]
         self.Y_train = self.training_dataset[:,-1]
 
-        self.input_dimensions = self.X_train_norm.shape[1]
+        self.input_dimensions = self.X_train_os.shape[1]
         self.nbr_classes = np.unique(self.Y_val).shape[0]
 
         return
@@ -357,12 +304,12 @@ class Classification():
         # The parameters of the ANN are stored in a dictionnary
 
         self.ann_parameters_talos =  {'loss_function': ['categorical_crossentropy'],
-                                      'learning_rate': [0.0005],
+                                      'learning_rate': [0.001],
                                       'batch_size': [256],
                                       'epochs': [200],
                                       'metrics': [['categorical_accuracy']],
                                       'nbr_layers': [3],
-                                      'nbr_neurons' : [32],
+                                      'nbr_neurons' : [128],
                                       'input_activation' : ['tanh'],
                                       'activation' : ['tanh'],
                                       'output_activation': ['softmax'],
@@ -523,10 +470,10 @@ class Classification():
         # ModelCheckpoint saves the weights of the neural network at each epoch
         checkpoint = ModelCheckpoint(os.path.join(self.model_path, 'checkpoints', checkpoints_name), verbose=2, save_best_only=False)
         # ReduceLROnPlateau reduces learning rate by a factor when the quantity monitored does not decreases for a given number of epoch (patience)
-        lrdecay = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=0.000001, min_delta=0.0001, cooldown=5, verbose=1)
+        lrdecay = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=15, min_lr=0.000001, min_delta=0.0001, cooldown=5, verbose=1)
         # lrdecay =  lr_decay_custom_callback(self.ann_parameters['learning_rate'], 0.9625, 0.000000001)
         # EarlyStopping stops training of the ANN if the quantity monitored does not get better for a given number of epoch (patience)
-        earlystop = EarlyStopping(monitor='loss', min_delta=0.0001, patience=15, verbose=1, mode='min')
+        earlystop = EarlyStopping(monitor='loss', min_delta=0.0001, patience=20, verbose=1, mode='min')
         # TensorBoard callback generates at each epochs the tensorboard files
         tsboard = TensorBoard(log_dir=os.path.join(self.model_path, 'tsboard'), histogram_freq=1, batch_size=self.ann_parameters['batch_size'], write_graph=True, write_grads=True, write_images=True, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None)
 
@@ -679,26 +626,17 @@ class Classification():
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        Y_pred_argmax = []
-        Y_true_argmax = []
-        for i in range(Y_pred.shape[0]):
-            Y_pred_argmax.append(np.argmax(Y_pred[i,:]))
-            Y_true_argmax.append(np.argmax(restored_object.Y_val[i,:]))
+        if self.compute_conf_matr:
+            mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, self.Y_val, self.DES_id_val, self.classnames, savepath, plot=True)
+        else:
+            mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, self.Y_val, self.DES_id_val, self.classnames)
 
-        prediction_report = {'DES_id': restored_object.DES_id_val, 'Y_true': Y_true_argmax, 'Y_pred': Y_pred_argmax, 'Others_prob': Y_pred[:,0], 'BG_prob': Y_pred[:,1], 'LRG_prob': Y_pred[:,2], 'ELG_prob': Y_pred[:,3], 'QSO_prob': Y_pred[:,4]}
-        pd.DataFrame.from_dict(prediction_report).to_csv(os.path.join(savepath, 'Probabilities.csv'), index=False)
-
-        mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, self.Y_val, self.DES_id_val, self.X_val, self.data_keys_train, self.classnames, self.color_cut_performances['val'], savepath)
-
-        savepath_post_processed = os.path.join(self.model_path, 'performances', 'val', 'post_processed')
-
-        if not os.path.exists(savepath_post_processed):
-            os.makedirs(savepath_post_processed)
-
-        mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, self.Y_val, self.DES_id_val, self.X_val, self.data_keys_train, self.classnames, self.color_cut_performances['val'], savepath_post_processed)
-
-        Y_pred = np.argmax(Y_pred, axis=-1)
-        Y_val = np.argmax(self.Y_val, axis=-1)
+        if Y_pred.shape[1] > 1:
+            Y_pred = np.argmax(Y_pred, axis=-1)
+            Y_val = np.argmax(self.Y_val, axis=-1)
+        else:
+            Y_pred = np.squeeze(Y_pred)
+            Y_pred = (Y_pred > 0.5).astype(int)
 
         report = classification_report(Y_val, Y_pred, target_names=self.classnames)
         filename_report = 'ANN_classification_validation_report.txt'
@@ -779,6 +717,69 @@ class Classification():
         print()
 
         sys.stdout.close()
+
+        return
+
+    def compute_zphot_regressor(self, regressor, model_index_zphot, weights_flag='final'):
+
+        script_path = os.path.realpath(__file__)
+        script_dir, _ = os.path.split(script_path)
+        model_path = os.path.join(script_dir, 'model_' + regressor + '_regression', str(model_index_zphot))
+
+        with open(os.path.join(model_path, 'ANN_architecture.json')) as f:
+            ANN_architecture = json.load(f)
+        with open(os.path.join(model_path,'ANN_parameters.json')) as f:
+            ANN_parameters = json.load(f)
+        with open(os.path.join(model_path,'regression_inputs.json')) as f:
+            regression_inputs = json.load(f)
+
+        restored_object_zphot = Regression(regressor='ANN',
+                                         preprocessing_method=regression_inputs['preprocessing_method'],
+                                         catalog_filename=regression_inputs['catalog_filename'],
+                                         regression_problem=regression_inputs['regression_problem'],
+                                         constraints=regression_inputs['constraints'],
+                                         data_imputation=regression_inputs['data_imputation'],
+                                         normalization=regression_inputs['normalization'],
+                                         train_test_val_split=regression_inputs['train_test_val_split'],
+                                         cv_fold_nbr=regression_inputs['cv_fold_nbr'],
+                                         cross_validation=regression_inputs['cross_validation'],
+                                         tsboard=regression_inputs['tsboard'],
+                                         early_stop=regression_inputs['early_stop'],
+                                         lrdecay=regression_inputs['lrdecay'],
+                                         zphot_conf_threshold=regression_inputs['zphot_conf_threshold']
+                                        )
+        restored_object_zphot.load_dataset()
+        del restored_object_zphot.X_val
+        del restored_object_zphot.X_train
+        del restored_object_zphot.X_test
+        restored_object_zphot.model_index = model_index_zphot
+        restored_object_zphot.model_path = model_path
+        restored_object_zphot.load_ANN(weights_flag)
+
+        dummy_zspec = np.ones(self.X_train_norm.shape[0])
+        X_train_zphot = np.zeros((self.X_train_norm.shape[0], self.X_train_norm.shape[1]+2))
+        X_train_zphot[:, 0:-2] = self.X_train_norm
+        print(self.X_train_norm[0,:])
+        print(self.X_train_norm[0, :-1])
+
+        Y_pred_zphot, z_phot_pdf, prediction_report = utils_regression.compute_PDF(restored_object_zphot.normalization, restored_object_zphot.normalizer, restored_object_zphot.data_imputation_values, self.DES_id_train, self.X_train_norm[:, :-1], dummy_zspec, restored_object_zphot.model, 100, 0.9, 1, 0.05)
+
+        X_train_zphot[:, -2] = Y_pred_zphot
+        X_train_zphot[:, -1] = prediction_report['stdev']
+
+        self.X_train_norm = X_train_zphot
+
+        dummy_zspec = np.ones(self.X_val_norm.shape[0])
+        X_val_zphot = np.zeros((self.X_val_norm.shape[0], self.X_val_norm.shape[1]+2))
+        X_val_zphot[:, 0:-2] = self.X_val_norm
+
+        Y_pred_zphot, z_phot_pdf, prediction_report = utils_regression.compute_PDF(restored_object_zphot.normalization, restored_object_zphot.normalizer, restored_object_zphot.data_imputation_values, self.DES_id_val, self.X_val_norm[:, :-1], dummy_zspec, restored_object_zphot.model, 100, 0.9, 1, 0.05)
+
+        X_val_zphot[:, -2] = Y_pred_zphot
+        X_val_zphot[:, -1] = prediction_report['stdev']
+
+        self.X_val_norm = X_val_zphot
+
 
         return
 
@@ -871,7 +872,7 @@ def evaluate_test(classifier, model_index, weights_flag='final'):
                                      tsboard=classification_inputs['tsboard'],
                                      early_stop=classification_inputs['early_stop'],
                                      lrdecay=classification_inputs['lrdecay'],
-                                     zphot_safe_threshold=classification_inputs['zphot_safe_threshold'],
+                                     compute_conf_matr=classification_inputs['compute_conf_matr'],
                                      model_index = model_index,
                                      model_path = model_path
                                     )
@@ -879,28 +880,13 @@ def evaluate_test(classifier, model_index, weights_flag='final'):
     restored_object.Y_train, restored_object.Y_val, restored_object.Y_test = utils_classification.one_hot_encode(restored_object.Y_train, restored_object.Y_val, restored_object.Y_test)
     restored_object.load_ANN(weights_flag)
     Y_pred = restored_object.model.predict(restored_object.X_test_norm)
-    Y_pred_argmax = []
-    Y_true_argmax = []
-    for i in range(Y_pred.shape[0]):
-        Y_pred_argmax.append(np.argmax(Y_pred[i,:]))
-        Y_true_argmax.append(np.argmax(restored_object.Y_test[i,:]))
 
     savepath = os.path.join(restored_object.model_path, 'performances', 'test')
 
     if not os.path.exists(savepath):
         os.makedirs(savepath)
 
-    prediction_report = {'DES_id': restored_object.DES_id_test, 'Y_true': Y_true_argmax, 'Y_pred': Y_pred_argmax, 'Others_prob': Y_pred[:,0], 'BG_prob': Y_pred[:,1], 'LRG_prob': Y_pred[:,2], 'ELG_prob': Y_pred[:,3], 'QSO_prob': Y_pred[:,4]}
-    pd.DataFrame.from_dict(prediction_report).to_csv(os.path.join(savepath, 'Probabilities.csv'), index=False)
-
-    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, restored_object.Y_test, restored_object.DES_id_test, restored_object.X_test, restored_object.data_keys_train, restored_object.classnames, restored_object.color_cut_performances['test'], savepath)
-
-    savepath_post_processed = os.path.join(restored_object.model_path, 'performances', 'test', 'post_processed')
-
-    if not os.path.exists(savepath_post_processed):
-        os.makedirs(savepath_post_processed)
-
-    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, restored_object.Y_test, restored_object.DES_id_test, restored_object.X_test, restored_object.data_keys_train, restored_object.classnames, restored_object.color_cut_performances['test'], savepath_post_processed)
+    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, restored_object.Y_test, restored_object.DES_id_test, restored_object.classnames, savepath=savepath, plot=True)
 
 def evaluate_val(classifier, model_index, weights_flag='final'):
 
@@ -928,7 +914,7 @@ def evaluate_val(classifier, model_index, weights_flag='final'):
                                      tsboard=classification_inputs['tsboard'],
                                      early_stop=classification_inputs['early_stop'],
                                      lrdecay=classification_inputs['lrdecay'],
-                                     zphot_safe_threshold=classification_inputs['zphot_safe_threshold'],
+                                     compute_conf_matr=classification_inputs['compute_conf_matr'],
                                      model_index = model_index,
                                      model_path = model_path
                                     )
@@ -950,14 +936,7 @@ def evaluate_val(classifier, model_index, weights_flag='final'):
     prediction_report = {'DES_id': restored_object.DES_id_val, 'Y_true': Y_true_argmax, 'Y_pred': Y_pred_argmax, 'Others_prob': Y_pred[:,0], 'BG_prob': Y_pred[:,1], 'LRG_prob': Y_pred[:,2], 'ELG_prob': Y_pred[:,3], 'QSO_prob': Y_pred[:,4]}
     pd.DataFrame.from_dict(prediction_report).to_csv(os.path.join(savepath, 'Probabilities.csv'), index=False)
 
-    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, restored_object.Y_val, restored_object.DES_id_val, restored_object.X_val, restored_object.data_keys_train, restored_object.classnames, restored_object.color_cut_performances['val'], savepath)
-
-    savepath_post_processed = os.path.join(restored_object.model_path, 'performances', 'val', 'post_processed')
-
-    if not os.path.exists(savepath_post_processed):
-        os.makedirs(savepath_post_processed)
-
-    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, restored_object.Y_val, restored_object.DES_id_val, restored_object.X_val, restored_object.data_keys_train, restored_object.classnames, restored_object.color_cut_performances['val'], savepath_post_processed)
+    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, restored_object.Y_test, restored_object.DES_id_test, restored_object.classnames, savepath=savepath, plot=True)
 
     return
 
@@ -993,7 +972,7 @@ def evaluate_colors_zphot(classifier, regressor, model_index_colors, model_index
                                          tsboard=classification_inputs['tsboard'],
                                          early_stop=classification_inputs['early_stop'],
                                          lrdecay=classification_inputs['lrdecay'],
-                                         zphot_safe_threshold=classification_inputs['zphot_safe_threshold']
+                                         compute_conf_matr=classification_inputs['compute_conf_matr']
                                         )
         restored_object_colors.load_dataset()
         restored_object_colors.Y_train, restored_object_colors.Y_val, restored_object_colors.Y_test = utils_classification.one_hot_encode(restored_object_colors.Y_train, restored_object_colors.Y_val, restored_object_colors.Y_test)
@@ -1027,208 +1006,119 @@ def evaluate_colors_zphot(classifier, regressor, model_index_colors, model_index
                                          tsboard=regression_inputs['tsboard'],
                                          early_stop=regression_inputs['early_stop'],
                                          lrdecay=regression_inputs['lrdecay'],
-                                         zphot_safe_threshold=regression_inputs['zphot_safe_threshold']
+                                         zphot_conf_threshold=regression_inputs['zphot_conf_threshold']
                                         )
         restored_object_zphot.load_dataset()
         restored_object_zphot.model_index = model_index_zphot
         restored_object_zphot.model_path = model_path
         restored_object_zphot.load_ANN(weights_flag)
 
-        dummy_zspec = np.ones(restored_object_colors.DES_id_val.shape[0])
+        # X_val_color_processed = utils_regression.fill_empty_entries(restored_object_colors.X_val[:, :-1], restored_object_zphot.data_imputation_values)
+        # X_val_color_processed = utils_regression.apply_normalization(X_test_color_processed, restored_object_zphot.normalization, restored_object_zphot.normalizer)
+        # Y_pred_zphot = restored_object_zphot.model.predict(X_test_color_processed)
+        # Y_pred_zphot = np.squeeze(Y_pred_zphot)
 
-        zphot_pdf, HSC_statistics_dict, metaphor_statistics_dict = utils_regression.compute_PDF(restored_object_zphot.normalization, restored_object_zphot.normalizer, restored_object_zphot.data_imputation_values, restored_object_colors.DES_id_val, restored_object_colors.X_val[:, :-1], dummy_zspec, restored_object_zphot.model, 100, 0.9, 1, 0.05)
+        Y_pred_zphot, z_phot_pdf, prediction_report = utils_regression.compute_PDF(restored_object_zphot.normalization, restored_object_zphot.normalizer, restored_object_zphot.data_imputation_values, restored_object_colors.DES_id_val, restored_object_colors.X_val[:, :-1], dummy_zspec, restored_object_zphot.model, 100, 0.9, 1, 0.05)
 
-        HSC_statistics_dict['DES_id'] = restored_object_colors.DES_id_val
-        HSC_statistics_dict['probability_BG'] = []
-        HSC_statistics_dict['probability_LRG'] = []
-        HSC_statistics_dict['probability_ELG'] = []
-        HSC_statistics_dict['probability_QSO'] = []
-        metaphor_statistics_dict['DES_id'] = restored_object_colors.DES_id_val
-
-        zphot_pdf_dict = {
-                            'DES_id': [],
-                            'z_spec': [],
-                            'bin_min': [],
-                            'bin_max': [],
-                            'z_peak': [],
-                            'probability': [],
-                            'variance': [],
-                            'probability_BG': [],
-                            'probability_LRG': [],
-                            'probability_ELG': [],
-                            'probability_QSO': []
-                           }
+        z_phot_pdf_dict = {'DES_id': [], 'bin_min': [], 'bin_max': [], 'probability': [], 'z_peak': [], 'z_spec': []}
 
         for i in range(restored_object_colors.DES_id_val.shape[0]):
             all_bin_min = []
             all_bin_max = []
             all_prob = []
-            zphot_pdf_dict['DES_id'].append(restored_object_colors.DES_id_val[i])
-            zphot_pdf_dict['z_spec'].append(dummy_zspec)
-            for j in range(len(zphot_pdf[i])):
-                all_bin_min.append(zphot_pdf[i][j][0])
-                all_bin_max.append(zphot_pdf[i][j][1])
-                all_prob.append(zphot_pdf[i][j][2])
-            zphot_pdf_dict['bin_min'].append(all_bin_min)
-            zphot_pdf_dict['bin_max'].append(all_bin_max)
-            zphot_pdf_dict['z_peak'].append(HSC_statistics_dict['z_peak'][i])
-            zphot_pdf_dict['probability'].append(all_prob)
-            zphot_pdf_dict['variance'].append(utils_regression.compute_PDF_variance(zphot_pdf[i]))
-            prob_BG = utils_regression.compute_PDF_probability(zphot_pdf[i], 0.05, 0.4)
-            prob_LRG = utils_regression.compute_PDF_probability(zphot_pdf[i], 0.4, 0.75)
-            prob_ELG = utils_regression.compute_PDF_probability(zphot_pdf[i], 0.75, 1.1)
-            prob_QSO = utils_regression.compute_PDF_probability(zphot_pdf[i], 1.1, 100)
-            zphot_pdf_dict['probability_BG'].append(prob_BG)
-            zphot_pdf_dict['probability_LRG'].append(prob_LRG)
-            zphot_pdf_dict['probability_ELG'].append(prob_ELG)
-            zphot_pdf_dict['probability_QSO'].append(prob_QSO)
-            HSC_statistics_dict['probability_BG'].append(prob_BG)
-            HSC_statistics_dict['probability_LRG'].append(prob_LRG)
-            HSC_statistics_dict['probability_ELG'].append(prob_ELG)
-            HSC_statistics_dict['probability_QSO'].append(prob_QSO)
+            z_phot_pdf_dict['DES_id'].append(restored_object_colors.DES_id_val[i])
+            z_phot_pdf_dict['z_peak'].append(Y_pred_zphot[i])
+            z_phot_pdf_dict['z_spec'].append(dummy_zspec[i])
+            for j in range(len(z_phot_pdf[i])):
+                all_bin_min.append(z_phot_pdf[i][j][0])
+                all_bin_max.append(z_phot_pdf[i][j][1])
+                all_prob.append(z_phot_pdf[i][j][2])
+            z_phot_pdf_dict['bin_min'].append(all_bin_min)
+            z_phot_pdf_dict['bin_max'].append(all_bin_max)
+            z_phot_pdf_dict['probability'].append(all_prob)
 
+    # conf_mask_colors = np.where(np.amax(Y_pred_colors, axis=1) < threshold_colors)[0]
+    # for i in conf_mask_colors:
+    #     if np.argmax(Y_pred_colors[i, :]) == 1.0:
+    #         if (Y_pred_zphot[i, 0] < 0.05) or (Y_pred_zphot[i, 0] > 0.4):
+    #             if (Y_pred_zphot[i, 2] < 0.0005):
+    #                 Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+    #             else:
+    #                 continue
+    #     elif np.argmax(Y_pred_colors[i, :]) == 2.0 :
+    #         if (Y_pred_zphot[i, 0] < 0.4) or (Y_pred_zphot[i, 0] > 0.75):
+    #             if (Y_pred_zphot[i, 2] < 0.005):
+    #                 Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+    #             else:
+    #                 continue
+    #     elif np.argmax(Y_pred_colors[i, :]) == 3.0:
+    #         if (Y_pred_zphot[i, 0] < 0.75) or (Y_pred_zphot[i, 0] > 1.1):
+    #             if (Y_pred_zphot[i, 2] < 0.001):
+    #                 Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+    #             else:
+    #                 continue
+    #     elif np.argmax(Y_pred_colors[i, :]) == 4.0:
+    #         if (Y_pred_zphot[i, 0] < 1.1):
+    #             if (Y_pred_zphot[i, 2] < 0.002):
+    #                 Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+    #             else:
+    #                 continue
 
-    conf_mask_colors = np.where(np.amax(Y_pred_colors, axis=1) < threshold_colors)[0]
-    probabilities_BG = []
-    probabilities_LRG = []
-    probabilities_ELG = []
-    probabilities_QSO = []
-    Y_pred_colors_labels = []
-    Y_val_colors_labels = []
-    pdf_variance = []
+        # conf_mask_colors = np.where(np.amax(Y_pred_colors, axis=1) < threshold_colors)[0]
+        # for i in conf_mask_colors:
+        #     if np.argmax(Y_pred_colors[i, :]) == 1.0:
+        #         if (z_phot_pdf_dict['bin_max'][i][-1] < 0.05) or (z_phot_pdf_dict['bin_min'][i][0] > 0.4):
+        #             Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+        #     elif np.argmax(Y_pred_colors[i, :]) == 2.0 :
+        #         if (z_phot_pdf_dict['bin_max'][i][-1] < 0.4) or (z_phot_pdf_dict['bin_min'][i][0] > 0.75):
+        #             Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+        #     elif np.argmax(Y_pred_colors[i, :]) == 3.0:
+        #         if (z_phot_pdf_dict['bin_max'][i][-1] < 0.75) or (z_phot_pdf_dict['bin_min'][i][0] > 1.1):
+        #             Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+        #     elif np.argmax(Y_pred_colors[i, :]) == 4.0:
+        #         if (z_phot_pdf_dict['bin_max'][i][-1] < 1.1):
+        #             Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
 
-    for i in range(restored_object_colors.DES_id_val.shape[0]):
-        Y_pred_colors_labels.append(np.argmax(Y_pred_colors[i, :]))
-        Y_val_colors_labels.append(np.argmax(restored_object_colors.Y_val[i, :]))
-        probabilities_BG.append(utils_regression.compute_PDF_probability(zphot_pdf[i], 0.05, 0.4))
-        probabilities_LRG.append(utils_regression.compute_PDF_probability(zphot_pdf[i], 0.4, 0.75))
-        probabilities_ELG.append(utils_regression.compute_PDF_probability(zphot_pdf[i], 0.75, 1.1))
-        probabilities_QSO.append(utils_regression.compute_PDF_probability(zphot_pdf[i], 1.1, 100))
-        pdf_variance.append(utils_regression.compute_PDF_variance(zphot_pdf[i]))
-        for idxj, j in enumerate([probabilities_BG[-1], probabilities_LRG[-1], probabilities_ELG[-1], probabilities_QSO[-1]]):
-            if (j > 0.95) and (metaphor_statistics_dict['perc_0.05'][i] >= 0.68):
-                Y_pred_colors_labels[-1] = idxj
+        conf_mask_colors = np.where(np.amax(Y_pred_colors, axis=1) < threshold_colors)[0]
+        probabilities_BG = []
+        probabilities_LRG = []
+        probabilities_ELG = []
+        probabilities_QSO = []
+        Y_pred_colors_labels = []
+        Y_val_colors_labels = []
+        pdf_variance = []
+
+        for i in range(restored_object_colors.DES_id_val.shape[0]):
+            Y_pred_colors_labels.append(np.argmax(Y_pred_colors[i, :]))
+            Y_val_colors_labels.append(np.argmax(restored_object_colors.Y_val[i, :]))
+            probabilities_BG.append(utils_regression.compute_PDF_probability(z_phot_pdf[i], 0.05, 0.4))
+            probabilities_LRG.append(utils_regression.compute_PDF_probability(z_phot_pdf[i], 0.4, 0.75))
+            probabilities_ELG.append(utils_regression.compute_PDF_probability(z_phot_pdf[i], 0.75, 1.1))
+            probabilities_QSO.append(utils_regression.compute_PDF_probability(z_phot_pdf[i], 1.1, 100))
+            pdf_variance.append(utils_regression.compute_PDF_variance(z_phot_pdf[i]))
+        # for i in conf_mask_colors:
+        #     if np.argmax(Y_pred_colors[i, :]) == 1.0:
+        #         if (utils_regression.compute_PDF_probability(z_phot_pdf[i], 0.05, 0.4) < 0.5):
+        #             Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+        #     elif np.argmax(Y_pred_colors[i, :]) == 2.0 :
+        #         if (utils_regression.compute_PDF_probability(z_phot_pdf[i], 0.4, 0.75) < 0.5):
+        #             Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+        #     elif np.argmax(Y_pred_colors[i, :]) == 3.0:
+        #         if (utils_regression.compute_PDF_probability(z_phot_pdf[i], 0.75, 1.1) < 0.5):
+        #             Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
+        #     elif np.argmax(Y_pred_colors[i, :]) == 4.0:
+        #         if (utils_regression.compute_PDF_probability(z_phot_pdf[i], 1.1, 100) < 0.5):
+        #             Y_pred_colors[i, :] = [1.0, 0.0, 0.0, 0.0, 0.0]
 
     savepath = os.path.join(script_dir, 'model_ANN_colors_zphot', 'colors_' + str(model_index_colors) + 'zphot_' + str(model_index_zphot))
 
     if not os.path.exists(savepath):
         os.makedirs(savepath)
 
-    prediction_report = {'DES_id': restored_object_colors.DES_id_val, 'Y_true': Y_val_colors_labels, 'Y_pred': Y_pred_colors_labels, 'z_peak': zphot_pdf_dict['z_peak'], 'perc_0.05': metaphor_statistics_dict['perc_0.05'], 'Probabilities_BG': probabilities_BG, 'Probabilities_LRG': probabilities_LRG, 'Probabilities_ELG': probabilities_ELG, 'Probabilities_QSO': probabilities_QSO}
-    pd.DataFrame.from_dict(prediction_report).to_csv(os.path.join(savepath, 'Probabilities_pdfs.csv'), index=False)
-    pd.DataFrame.from_dict(HSC_statistics_dict).to_csv(os.path.join(savepath, 'pdfs_HSC_statistics.csv'), index=False)
-    pd.DataFrame.from_dict(metaphor_statistics_dict).to_csv(os.path.join(savepath, 'pdfs_METAPHOR_statistics.csv'), index=False)
-
-    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred_colors, restored_object_colors.Y_val, restored_object_colors.DES_id_val, restored_object_colors.X_val, restored_object_colors.data_keys_train, restored_object_colors.classnames, restored_object_colors.color_cut_performances['val'], savepath)
-
-    savepath = os.path.join(script_dir, 'model_ANN_colors_zphot', 'colors_' + str(model_index_colors) + 'zphot_' + str(model_index_zphot) + 'post_processed')
-
-    if not os.path.exists(savepath):
-        os.makedirs(savepath)
-
-    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred_colors, restored_object_colors.Y_val, restored_object_colors.DES_id_val, restored_object_colors.X_val, restored_object_colors.data_keys_train, restored_object_colors.classnames, restored_object_colors.color_cut_performances['val'], savepath)
-
-    return
-
-def evaluate_on_dataset(classifier, model_index, dataset_catalog_filename, dataset_constraints, dataset_filename, weights_flag='final'):
-
-    script_path = os.path.realpath(__file__)
-    script_dir, _ = os.path.split(script_path)
-    model_path = os.path.join(script_dir, 'model_' + classifier + '_classification', str(model_index))
-
-    dataset_full_path = os.path.join(script_dir, 'datasets', dataset_catalog_filename, dataset_constraints + '-constraints', dataset_filename)
-    dataset_filename, _ = os.path.splitext(dataset_filename)
-
-    with open(os.path.join(model_path, 'ANN_architecture.json')) as f:
-        ANN_architecture = json.load(f)
-    with open(os.path.join(model_path,'ANN_parameters.json')) as f:
-        ANN_parameters = json.load(f)
-    with open(os.path.join(model_path,'classification_inputs.json')) as f:
-        classification_inputs = json.load(f)
-
-    restored_object = Classification(classifier='ANN',
-                                     preprocessing_method=classification_inputs['preprocessing_method'],
-                                     catalog_filename=classification_inputs['catalog_filename'],
-                                     classification_problem=classification_inputs['classification_problem'],
-                                     constraints=classification_inputs['constraints'],
-                                     data_imputation=classification_inputs['data_imputation'],
-                                     normalization=classification_inputs['normalization'],
-                                     train_test_val_split=classification_inputs['train_test_val_split'],
-                                     cv_fold_nbr=classification_inputs['cv_fold_nbr'],
-                                     cross_validation=classification_inputs['cross_validation'],
-                                     tsboard=classification_inputs['tsboard'],
-                                     early_stop=classification_inputs['early_stop'],
-                                     lrdecay=classification_inputs['lrdecay'],
-                                     compute_conf_matr=classification_inputs['compute_conf_matr'],
-                                     model_index = model_index,
-                                     model_path = model_path
-                                    )
-    restored_object.load_dataset()
-    restored_object.Y_train, restored_object.Y_val, restored_object.Y_test = utils_classification.one_hot_encode(restored_object.Y_train, restored_object.Y_val, restored_object.Y_test)
-    restored_object.load_ANN(weights_flag)
-
-    dataset, dataset_keys = utils_classification.read_fits(dataset_full_path)
-    np.random.shuffle(dataset)
-    DES_id_dataset = dataset[:,0]
-    sample_weights_dataset = dataset[:,1]
-    dataset_keys = dataset_keys[0:-1]
-    X_dataset = dataset[:,2:-1]
-    Y_dataset = dataset[:,-1]
-
-    unique, counts = np.unique(Y_dataset, return_counts=True)
-    class_count_dict = dict(zip(unique, counts))
-    print('Before_rossover : ', class_count_dict)
-
-    X_dataset_norm = utils_classification.apply_normalization(X_dataset, restored_object.normalization, restored_object.normalizer)
-    X_dataset_norm = utils_classification.fill_empty_entries(X_dataset_norm, restored_object.data_imputation_values)
-
-    Y_pred = restored_object.model.predict(X_dataset_norm)
-    Y_pred_argmax = []
-    for i in range(Y_pred.shape[0]):
-        Y_pred_argmax.append(np.argmax(Y_pred[i,:]))
-
-    savepath = os.path.join(restored_object.model_path, 'performances', dataset_filename)
-
-    if not os.path.exists(savepath):
-        os.makedirs(savepath)
-
-    Y_dataset_onehot, _, _= utils_classification.one_hot_encode(Y_dataset, Y_dataset, Y_dataset)
-
-    prediction_report = {'DES_id': DES_id_dataset, 'Y_true': Y_dataset, 'Y_pred': Y_pred_argmax, 'Others_prob': Y_pred[:,0], 'BG_prob': Y_pred[:,1], 'LRG_prob': Y_pred[:,2], 'ELG_prob': Y_pred[:,3], 'QSO_prob': Y_pred[:,4]}
+    prediction_report = {'DES_id': restored_object_colors.DES_id_val, 'Y_true': Y_val_colors_labels, 'Y_pred': Y_pred_colors_labels, 'z_peak': z_phot_pdf_dict['z_peak'], 'pdf_variance': pdf_variance, 'Probabilities_BG': probabilities_BG, 'Probabilities_LRG': probabilities_LRG, 'Probabilities_ELG': probabilities_ELG, 'Probabilities_QSO': probabilities_QSO}
     pd.DataFrame.from_dict(prediction_report).to_csv(os.path.join(savepath, 'Probabilities.csv'), index=False)
 
-    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, Y_dataset_onehot, DES_id_dataset, restored_object.classnames, savepath=savepath, plot=True)
-
-    no_crossover_idx = np.where(~(np.in1d(DES_id_dataset, restored_object.DES_id_val))*(~(np.in1d(DES_id_dataset, restored_object.DES_id_train))))[0]
-    DES_id_dataset = DES_id_dataset[no_crossover_idx]
-    sample_weights_dataset = sample_weights_dataset[no_crossover_idx]
-    X_dataset = X_dataset[no_crossover_idx, :]
-    Y_dataset = Y_dataset[no_crossover_idx]
-
-    unique, counts = np.unique(Y_dataset, return_counts=True)
-    class_count_dict = dict(zip(unique, counts))
-    print('After_rossover : ', class_count_dict)
-
-    X_dataset_norm = utils_classification.apply_normalization(X_dataset, restored_object.normalization, restored_object.normalizer)
-    X_dataset_norm = utils_classification.fill_empty_entries(X_dataset_norm, restored_object.data_imputation_values)
-
-    Y_pred = restored_object.model.predict(X_dataset_norm)
-    Y_pred_argmax = []
-    for i in range(Y_pred.shape[0]):
-        Y_pred_argmax.append(np.argmax(Y_pred[i,:]))
-
-    savepath = os.path.join(restored_object.model_path, 'performances', dataset_filename + '_nocrossover')
-
-    if not os.path.exists(savepath):
-        os.makedirs(savepath)
-
-    Y_dataset_onehot, _, _= utils_classification.one_hot_encode(Y_dataset, Y_dataset, Y_dataset)
-
-    prediction_report = {'DES_id': DES_id_dataset, 'Y_true': Y_dataset, 'Y_pred': Y_pred_argmax, 'Others_prob': Y_pred[:,0], 'BG_prob': Y_pred[:,1], 'LRG_prob': Y_pred[:,2], 'ELG_prob': Y_pred[:,3], 'QSO_prob': Y_pred[:,4]}
-    pd.DataFrame.from_dict(prediction_report).to_csv(os.path.join(savepath, 'Probabilities.csv'), index=False)
-
-    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred, Y_dataset_onehot, DES_id_dataset, restored_object.classnames, savepath=savepath, plot=True)
-
+    mean_auc_roc, mean_auc_pr = utils_classification.compute_aucs(Y_pred_colors, restored_object_colors.Y_val, restored_object_colors.DES_id_val, restored_object_colors.classnames, savepath=savepath, plot=True)
 
     return
 
@@ -1262,12 +1152,96 @@ def f1(y_true, y_pred):
 
 if __name__ == '__main__':
 
-    # evaluate_on_dataset('ANN', 1, '4MOST.CatForGregoire.05Dec2018.zphot', 'noout+bright', 'BG_LRG_ELG_QSO_classification_ephor.fits')
-    # evaluate_val('ANN', 1)
-    evaluate_colors_zphot('ANN', 'ANN', 2, 1, 1.0, weights_flag='final')
+    evaluate_val('ANN', 149)
+    # evaluate_colors_zphot('ANN', 'ANN', 149, 100, 1.0, weights_flag='best')
+
+    # Default ANN run without preprocessing
+
+    # BG_ELG_LRG_QSO_classification = Classification( lrdecay=True, early_stop=True, compute_conf_matr=True)
+    # BG_ELG_LRG_QSO_classification.load_dataset()
+    # BG_ELG_LRG_QSO_classification.run()
+
+    # ANN run with preprocessing
+
+    # preprocessing_method = [{'method': 'ENN_us', 'arguments':['majority', 6, 'all']}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=0.0, normalization=True, lrdecay=True, early_stop=True, compute_conf_matr=True)
+    # BG_ELG_LRG_QSO_classification.load_dataset()
+    # BG_ELG_LRG_QSO_classification.run()
+
+    # ANN gridsearch
+
+    # preprocessing_method = [{'method': 'RANDOM_us', 'arguments':[150]}, {'method': 'Borderline_SMOTE_os', 'arguments':[2, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='max', constraints='nooutcolors+mag', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+
+    # preprocessing_method = [{'method': 'RANDOM_us', 'arguments':[150]}, {'method': 'ADASYN_os', 'arguments':[2, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='max', constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
 
     # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4, 5]}]
-    # BG_ELG_LRG_QSO_classification = Classification(classification_problem='BG_LRG_ELG_QSO_classification_ephor', preprocessing_method=preprocessing_method, data_imputation='max', constraints='noout+bright', normalization='cr', lrdecay=True, early_stop=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='max', constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+
+    preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4, 5]}]
+    BG_ELG_LRG_QSO_classification = Classification(ANN_zphot=True, preprocessing_method=preprocessing_method, data_imputation='max', constraints='nooutcrossover', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'RANDOM_os', 'arguments':[4]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='max', constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='mean', constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'RANDOM_os', 'arguments':[4]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='mean', constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[2, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='max', constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=3)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[2, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='max', constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=4)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[2, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation='max', constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=5)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+
+    # evaluate_cv('ANN', [49, 50, 51, 52, 53])
+
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=-1, constraints='nooutcolors', normalization='quant', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=0.0, constraints='noout', normalization='cr', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4, 5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=-1, constraints='noout', normalization='quant', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4,5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=-1.0, constraints='noout', normalization='quant', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=1)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4,5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=-1.0, constraints='noout', normalization='quant', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=2)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4,5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=-1.0, constraints='noout', normalization='quant', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=3)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4,5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=-1.0, constraints='noout', normalization='quant', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=4)
+    # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
+    #
+    # preprocessing_method = [{'method': 'ADASYN_os', 'arguments':[4,5]}]
+    # BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=preprocessing_method, data_imputation=-1.0, constraints='noout', normalization='quant', lrdecay=True, early_stop=True, compute_conf_matr=True, tsboard=False, train_test_val_split=[80, 20, 20], cv_fold_nbr=5)
     # BG_ELG_LRG_QSO_classification.run_ANN_gridsearch()
 
     #Random Forest gridsearch
@@ -1315,3 +1289,36 @@ if __name__ == '__main__':
     #                          [{'method': 'ENN_us', 'arguments':['majority', 6, 'all']}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}],
     #                          [{'method': 'NearMiss_us', 'arguments':['majority', 6, 6, 3]}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}],
     #                          [{'method': 'NearMiss_us', 'arguments':['majority', 6, 6, 1]}, {'method': 'SMOTE_ENN', 'arguments':['auto', 5, 3, 'all']}]]
+
+    # for i in preprocessing_methods:
+    #     BG_ELG_LRG_QSO_classification = Classification(preprocessing_method=i, early_stop=True, lrdecay=True)
+    #     BG_ELG_LRG_QSO_classification.load_dataset()
+
+
+    # def load_dataset(self):
+    #
+    #     self.DES_id_train, self.X_train, self.Y_train, self.sample_weights_train, self.DES_id_val, self.X_val, self.Y_val, self.sample_weights_val, self.DES_id_test, self.X_test, self.Y_test, self.sample_weights_test, self.data_keys = utils_classification.load_dataset(self.dataset_path, self.model_path, self.classification_problem, self.train_test_val_split, self.cv_fold_nbr, self.normalization, self.data_imputation, self.random_seed)
+    #     self.X_train_norm, self.X_val_norm, self.X_test_norm, self.data_imputation_values = utils_classification.fill_empty_entries_dataset(self.X_train, self.X_val,self. X_test, self.data_imputation, self.constraints)
+    #     self.X_train_norm, self.X_val_norm, self.X_test_norm, self.normalizer = utils_classification.normalize_dataset(self.X_train_norm, self.X_val_norm, self.X_test_norm, self.normalization, self.random_seed)
+    #     if self.preprocessing_method is not None:
+    #         already_applied, to_apply = self.check_existing_preprocessed_datasets()
+    #         if already_applied:
+    #             print('Loading following preprocessed dataset : ', already_applied)
+    #             self.load_preprocessed_dataset(already_applied)
+    #         if to_apply:
+    #             print('Processing dataset with : ', to_apply)
+    #             for i in to_apply:
+    #                 if len(i['arguments']) == 1:
+    #                     self.X_train_norm, self.Y_train = getattr(preprocessing_classification, i['method'])(self.X_train_norm, self.Y_train, self.random_seed, i['arguments'][0])
+    #                 elif len(i['arguments']) == 2:
+    #                     self.X_train_norm, self.Y_train = getattr(preprocessing_classification, i['method'])(self.X_train_norm, self.Y_train, self.random_seed, i['arguments'][0], i['arguments'][1])
+    #                 elif len(i['arguments']) == 3:
+    #                     self.X_train_norm, self.Y_train = getattr(preprocessing_classification, i['method'])(self.X_train_norm, self.Y_train, self.random_seed, i['arguments'][0], i['arguments'][1], i['arguments'][2])
+    #                 elif len(i['arguments']) == 4:
+    #                     self.X_train_norm, self.Y_train = getattr(preprocessing_classification, i['method'])(self.X_train_norm, self.Y_train, self.random_seed, i['arguments'][0], i['arguments'][1], i['arguments'][2], i['arguments'][3])
+    #             preprocessing_classification.save_preprocessed_dataset(self.script_dir, self.catalog_filename, self.constraints, self.data_imputation, self.normalization, self.classification_problem, self.train_test_val_split, self.cv_fold_nbr, self.preprocessing_method, self.X_train_norm, self.Y_train)
+    #
+    #     self.input_dimensions = self.X_train_norm.shape[1]
+    #     self.nbr_classes = np.unique(self.Y_test).shape[0]
+    #
+    #     return
