@@ -146,6 +146,13 @@ model_ANN_classification/
 	Benchmnark_ANN_performances.csv (Table that summarizes the performances of each model on validation data)
 ```
 
+An example of model training and evaluation for classification is available in the following python notebook :
+
+```
+classification_training_notebook
+classification_evaluation_notebook
+```
+
 ### Train a regression network
 
 To train a network for regression task one should run the corresponding script using :
@@ -181,6 +188,21 @@ model_ANN_regression/
 	Benchmnark_ANN_inputs.csv (Table that summarizes the inputs used in classification.py for each model)
 	Benchmnark_ANN_parameters.csv (Table that summarizes the inputs used in the neural network for each model)
 	Benchmnark_ANN_performances.csv (Table that summarizes the performances of each model on validation data)
+```
+
+An example of model training and evaluation for regression is available in the following python notebook :
+
+```
+regression_training_notebook
+regression_evaluation_notebook
+```
+
+## Use a model for prediction on dataset
+
+To use a trained model to make predictiions on a dataset, please follow the instructions of the following python notebook :
+
+```
+model_prediction_notebook
 ```
 
 ## Authors
