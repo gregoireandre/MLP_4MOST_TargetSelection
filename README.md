@@ -129,11 +129,11 @@ model_ANN_classification/
 			...
 		performances/
 			val/
-				Contain various plot regarding network performances on validation dataset (loss, custom metrics, 					confusion matrix, PR curves, ROC curves)
+				Contain various plot regarding network performances on validation dataset (loss, custom metrics, confusion matrix, PR curves, ROC curves)
 			test/
-				Contain various plot regarding network performances on testing dataset (loss, custom metrics, 						confusion matrix, PR curves, ROC curves)
+				Contain various plot regarding network performances on testing dataset (loss, custom metrics, confusion matrix, PR curves, ROC curves)
 			post_processed/
-				Contain various plot regarding network performances after post processing (loss, custom metrics, 					confusion matrix, PR curves, ROC curves)
+				Contain various plot regarding network performances after post processing (loss, custom metrics, confusion matrix, PR curves, ROC curves)
 		tsboard/
 			tensoboard files if tsboard enabled
 		ANN_architecture.json (model architecture saved as json format)
@@ -168,9 +168,9 @@ model_ANN_regression/
 			...
 		performances/
 			val/
-				Contain various plot regarding network performances on validation dataset (loss, custom metrics, 					confusion matrix, PR curves, ROC curves)
+				Contain various plot regarding network performances on validation dataset (loss, custom metrics, confusion matrix, PR curves, ROC curves)
 			test/
-				Contain various plot regarding network performances on testing dataset (loss, custom metrics, 						confusion matrix, PR curves, ROC curves)
+				Contain various plot regarding network performances on testing dataset (loss, custom metrics, confusion matrix, PR curves, ROC curves)
 		tsboard/
 			tensoboard files if tsboard enabled
 		ANN_architecture.json (model architecture saved as json format)
