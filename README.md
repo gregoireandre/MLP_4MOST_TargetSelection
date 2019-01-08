@@ -76,11 +76,11 @@ utils_regression.py
 custom_metrics_classification.py
 ```
 
-More explicitely :
-"dataset_generator" scripts allow to generate the dataset for training and regression purpose from the fits file provided.
-"utils" scripts contain all the utilities functions used in the classification/regression scripts.
-"classification" script contains the neural network implementation, training callback and evaluation for classification
-"regression" script contains the neural network implementation, training callback and evaluation for regression
+More explicitely :  
+"dataset_generator" scripts allow to generate the dataset for training and regression purpose from the fits file provided.  
+"utils" scripts contain all the utilities functions used in the classification/regression scripts.  
+"classification" script contains the neural network implementation, training callback and evaluation for classification.  
+"regression" script contains the neural network implementation, training callback and evaluation for regression.  
 "custom_metrics" scripts allow to define custom metrics in the form of keras callback that can be used during training of the network to monitor performances. This script was mainly justified by the fact that keras does not include anymore f1-score in its default metric, it also allow to get more in depth review of the per class performances during training as one can define class-wise metric in the later (which is useful in highly unbalanced classification problems).
 
 ### Generate Training, Validation and Testing Datasets
